@@ -58,6 +58,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         console.error('Error fetching profile:', error)
+        // Fallback para evitar travamento infinito na tela de carregamento (ex: cache de esquema do Supabase desatualizado)
+        setProfile({
+          id: uid,
+          nome: user?.user_metadata?.nome || 'Usuário',
+          email: user?.email || '',
+          moeda: 'R$',
+          fechamento_dia: 30,
+          tema: 'dark',
+          ativo: true,
+        })
       } else if (data) {
         // Flatten settings (handles both array and single object returns depending on supabase version)
         const settingsRaw: any = data.settings
