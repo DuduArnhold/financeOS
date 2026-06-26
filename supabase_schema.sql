@@ -197,6 +197,8 @@ create policy "Usuários gerenciam depósitos de suas metas" on public.finance_g
 -- =========================================================================
 create index if not exists idx_finance_movements_user on public.finance_movements(user_id);
 create index if not exists idx_finance_movements_date on public.finance_movements(data);
+create index if not exists idx_finance_movements_account on public.finance_movements(account_id);
+create index if not exists idx_finance_movements_category on public.finance_movements(categoria_id);
 create index if not exists idx_finance_contas_user on public.finance_contas(user_id);
 create index if not exists idx_finance_accounts_user on public.finance_accounts(user_id);
 create index if not exists idx_user_modules_user on public.user_modules(user_id);
