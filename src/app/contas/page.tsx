@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDateLabel } from '@/lib/utils'
 import { 
   CalendarDays, 
@@ -16,25 +15,31 @@ import {
   DollarSign,
   AlertCircle,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  CreditCard,
+  Briefcase,
+  Tag,
+  MessageSquare
 } from 'lucide-react'
 import Loader from '@/components/Loader'
 import { toast } from 'sonner'
+import { contaService } from '@/services/conta.service'
+import { accountService } from '@/services/account.service'
+import { categoryService } from '@/services/category.service'
+import { Conta } from '@/repositories/conta.repository'
+import { Account } from '@/repositories/account.repository'
+import { Category } from '@/repositories/category.repository'
 
-interface Conta {
-  id: string
-  nome: string
-  valor: number
-  vencimento: string
-  paga: boolean
-  recorrente: boolean
-}
+const FORMAS_PAGAMENTO = ['Pix', 'Boleto', 'Cartão de Crédito', 'Cartão de Débito', 'Dinheiro', 'Outro']
 
 export default function ContasPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
   const [contas, setContas] = useState<Conta[]>([])
+  const [categorias, setCategorias] = useState<Category[]>([])
+  const [contasFinanceiras, setContasFinanceiras] = useState<Account[]>([])
+  
   const [dataLoading, setDataLoading] = useState(true)
   const [isFormOpen, setIsFormOpen] = useState(false)
   
@@ -46,6 +51,21 @@ export default function ContasPage() {
   const [recorrente, setRecorrente] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  // Payment Modal State
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false)
+  const [payingConta, setPayingConta] = useState<Conta | null>(null)
+  const [payAccountId, setPayAccountId] = useState('')
+  const [payCategoryId, setPayCategoryId] = useState('')
+  const [payMethod, setPayMethod] = useState(FORMAS_PAGAMENTO[0])
+  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0])
+  const [payObservation, setPayObservation] = useState('')
+  const [paying, setPaying] = useState(false)
+
+  // Unpay Modal State
+  const [isUnpayModalOpen, setIsUnpayModalOpen] = useState(false)
+  const [unpayingConta, setUnpayingConta] = useState<Conta | null>(null)
+  const [unpaying, setUnpaying] = useState(false)
+
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login')
@@ -56,15 +76,12 @@ export default function ContasPage() {
     if (!user || !profile) return
     setDataLoading(true)
     try {
-      // Buscar todas as contas do usuário da tabela modular finance_contas
-      const { data: list, error } = await supabase
-        .from('finance_contas')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('vencimento', { ascending: true })
-
-      if (error) throw error
-      setContas(list || [])
+      const result = await contaService.getContas(user.id)
+      if (result.success && result.data) {
+        setContas(result.data)
+      } else if (result.error) {
+        toast.error(result.error)
+      }
     } catch (err) {
       console.error('Error fetching contas:', err)
       toast.error('Erro ao carregar contas.')
@@ -73,8 +90,27 @@ export default function ContasPage() {
     }
   }
 
+  const loadInitialData = async () => {
+    if (!user || !profile) return
+    try {
+      const [contasRes, catRes] = await Promise.all([
+        accountService.getActiveAccounts(user.id),
+        categoryService.getCategoriesByType(user.id, 'despesa')
+      ])
+      if (contasRes.success && contasRes.data) {
+        setContasFinanceiras(contasRes.data)
+      }
+      if (catRes.success && catRes.data) {
+        setCategorias(catRes.data)
+      }
+    } catch (err) {
+      console.error('Error loading static data for payment modal:', err)
+    }
+  }
+
   useEffect(() => {
     loadContas()
+    loadInitialData()
   }, [user, profile])
 
   const handleOpenNewForm = () => {
@@ -102,7 +138,7 @@ export default function ContasPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!nome) {
+    if (!nome.trim()) {
       toast.error('Informe o nome da conta.')
       return
     }
@@ -119,40 +155,41 @@ export default function ContasPage() {
     try {
       if (editingId) {
         // Edit Mode
-        const { error } = await supabase
-          .from('finance_contas')
-          .update({
-            nome,
-            valor: Number(valor),
-            vencimento,
-            recorrente
-          })
-          .eq('id', editingId)
-
-        if (error) throw error
-        toast.success('Conta atualizada com sucesso!')
+        const result = await contaService.updateConta(
+          editingId,
+          user!.id,
+          nome.trim(),
+          Number(valor),
+          vencimento,
+          recorrente
+        )
+        if (result.success) {
+          toast.success('Conta atualizada com sucesso!')
+          handleCloseForm()
+          await loadContas()
+        } else {
+          toast.error(result.error || 'Erro ao atualizar conta.')
+        }
       } else {
         // Create Mode
-        const { error } = await supabase
-          .from('finance_contas')
-          .insert({
-            user_id: user?.id,
-            nome,
-            valor: Number(valor),
-            vencimento,
-            paga: false,
-            recorrente
-          })
-
-        if (error) throw error
-        toast.success('Conta registrada!')
+        const result = await contaService.createConta(
+          user!.id,
+          nome.trim(),
+          Number(valor),
+          vencimento,
+          recorrente
+        )
+        if (result.success) {
+          toast.success('Conta registrada!')
+          handleCloseForm()
+          await loadContas()
+        } else {
+          toast.error(result.error || 'Erro ao registrar conta.')
+        }
       }
-
-      handleCloseForm()
-      await loadContas()
     } catch (err: any) {
       console.error('Error submitting conta:', err)
-      toast.error(err.message || 'Erro ao registrar conta.')
+      toast.error('Erro ao registrar conta.')
     } finally {
       setSubmitting(false)
     }
@@ -162,44 +199,98 @@ export default function ContasPage() {
     if (!confirm('Deseja realmente excluir esta conta?')) return
 
     try {
-      const { error } = await supabase
-        .from('finance_contas')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
-      toast.success('Conta excluída.')
-      await loadContas()
+      const result = await contaService.deleteConta(id, user!.id)
+      if (result.success) {
+        toast.success('Conta excluída.')
+        await loadContas()
+      } else {
+        toast.error(result.error || 'Erro ao excluir conta.')
+      }
     } catch (err: any) {
       console.error('Error deleting conta:', err)
-      toast.error(err.message || 'Erro ao excluir conta.')
+      toast.error('Erro ao excluir conta.')
     }
   }
 
-  const toggleStatus = async (conta: Conta) => {
-    const originalStatus = conta.paga
-    const newStatus = !originalStatus
-
-    // Optimistic Update
-    setContas(prev => 
-      prev.map(c => c.id === conta.id ? { ...c, paga: newStatus } : c)
-    )
-
+  const handleConfirmPayment = async () => {
+    if (!payingConta || !user) return
+    setPaying(true)
     try {
-      const { error } = await supabase
-        .from('finance_contas')
-        .update({ paga: newStatus })
-        .eq('id', conta.id)
-
-      if (error) throw error
-      toast.success(newStatus ? 'Conta marcada como paga!' : 'Conta marcada como pendente!')
-    } catch (err: any) {
-      // Revert if error
-      setContas(prev => 
-        prev.map(c => c.id === conta.id ? { ...c, paga: originalStatus } : c)
+      const result = await contaService.payConta(
+        payingConta.id,
+        user.id,
+        payAccountId,
+        payCategoryId,
+        payMethod,
+        payDate,
+        payObservation.trim()
       )
-      console.error('Error toggling conta status:', err)
-      toast.error(err.message || 'Erro ao atualizar status da conta.')
+      if (result.success) {
+        toast.success('Pagamento registrado com sucesso!')
+        setIsPayModalOpen(false)
+        setPayingConta(null)
+        await loadContas()
+      } else {
+        toast.error(result.error || 'Erro ao registrar pagamento.')
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Erro ao processar pagamento.')
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  const handleConfirmUnpay = async (deleteMovement: boolean) => {
+    if (!unpayingConta || !user) return
+    setUnpaying(true)
+    try {
+      const result = await contaService.unpayConta(
+        unpayingConta.id,
+        user.id,
+        deleteMovement
+      )
+      if (result.success) {
+        toast.success('Pagamento desfeito!')
+        setIsUnpayModalOpen(false)
+        setUnpayingConta(null)
+        await loadContas()
+      } else {
+        toast.error(result.error || 'Erro ao desfazer pagamento.')
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Erro ao desfazer pagamento.')
+    } finally {
+      setUnpaying(false)
+    }
+  }
+
+  const toggleStatus = (conta: Conta) => {
+    if (conta.paga) {
+      setUnpayingConta(conta)
+      setIsUnpayModalOpen(true)
+    } else {
+      setPayingConta(conta)
+      
+      // Default configurations
+      if (contasFinanceiras.length > 0) {
+        setPayAccountId(contasFinanceiras[0].id)
+      }
+      
+      // Memory Link (Categoria preferida)
+      if (conta.categoriaPreferidaId && categorias.some(c => c.id === conta.categoriaPreferidaId)) {
+        setPayCategoryId(conta.categoriaPreferidaId)
+      } else if (categorias.length > 0) {
+        setPayCategoryId(categorias[0].id)
+      } else {
+        setPayCategoryId('')
+      }
+
+      setPayMethod(FORMAS_PAGAMENTO[0])
+      setPayDate(new Date().toISOString().split('T')[0])
+      setPayObservation(`Pagamento da conta: ${conta.nome}`)
+      setIsPayModalOpen(true)
     }
   }
 
@@ -211,7 +302,7 @@ export default function ContasPage() {
 
   const contasPendentes = contas.filter(c => !c.paga)
   const contasPagas = contas.filter(c => c.paga)
-  const totalPendente = contasPendentes.reduce((sum, c) => sum + Number(c.valor), 0)
+  const totalPendente = contasPendentes.reduce((sum, c) => sum + c.valor, 0)
 
   return (
     <main className="container max-w-lg mx-auto px-4 pt-6 pb-20 animate-fade-in">
@@ -491,6 +582,210 @@ export default function ContasPage() {
           )}
         </div>
       </div>
+
+      {/* Modal de Pagamento */}
+      {isPayModalOpen && payingConta && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-card rounded-2xl p-6 border-slate-800 max-w-sm w-full shadow-2xl animate-fade-in">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                Confirmar Pagamento
+              </h3>
+              <button 
+                onClick={() => { setIsPayModalOpen(false); setPayingConta(null); }}
+                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-5 leading-relaxed">
+              Você está marcando a conta <strong className="text-slate-200">{payingConta.nome}</strong> no valor de <strong className="text-emerald-400">{formatCurrency(payingConta.valor, currencySymbol)}</strong> como paga.
+            </p>
+
+            <div className="space-y-4">
+              {/* Conta Financeira */}
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
+                  Conta de Origem
+                </label>
+                <select
+                  value={payAccountId}
+                  onChange={(e) => setPayAccountId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
+                >
+                  {contasFinanceiras.length === 0 ? (
+                    <option value="">Nenhuma conta ativa disponível</option>
+                  ) : (
+                    contasFinanceiras.map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.nome}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Categoria */}
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-rose-400" />
+                  Categoria da Despesa
+                </label>
+                <select
+                  value={payCategoryId}
+                  onChange={(e) => setPayCategoryId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
+                >
+                  {categorias.length === 0 ? (
+                    <option value="">Nenhuma categoria de despesa disponível</option>
+                  ) : (
+                    categorias.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.nome}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Forma de Pagamento */}
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                  Forma de Pagamento
+                </label>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
+                >
+                  {FORMAS_PAGAMENTO.map(method => (
+                    <option key={method} value={method}>{method}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Data de Pagamento */}
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  Data de Pagamento
+                </label>
+                <input
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input"
+                />
+              </div>
+
+              {/* Observação / Descrição */}
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                  Descrição da Transação
+                </label>
+                <input
+                  type="text"
+                  value={payObservation}
+                  onChange={(e) => setPayObservation(e.target.value)}
+                  placeholder="Ex: Pagamento da conta de Luz"
+                  className="w-full px-3 py-2 rounded-xl text-xs font-medium glass-input"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => { setIsPayModalOpen(false); setPayingConta(null); }}
+                className="flex-1 bg-slate-850 hover:bg-slate-800 text-slate-300 py-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                disabled={paying}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPayment}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/10 active:scale-95 cursor-pointer"
+                disabled={paying || !payAccountId || !payCategoryId}
+              >
+                {paying ? (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    Pagar Conta
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Desfazer Pagamento */}
+      {isUnpayModalOpen && unpayingConta && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-card rounded-2xl p-6 border-slate-800 max-w-sm w-full shadow-2xl animate-fade-in">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-500" />
+                Desfazer Pagamento
+              </h3>
+              <button 
+                onClick={() => { setIsUnpayModalOpen(false); setUnpayingConta(null); }}
+                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Você deseja reverter o pagamento da conta <strong className="text-white">{unpayingConta.nome}</strong> de <strong className="text-amber-400">{formatCurrency(unpayingConta.valor, currencySymbol)}</strong> para o status de <strong>Pendente</strong>?
+            </p>
+
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 mb-5">
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Esta conta gerou uma despesa correspondente em seu histórico financeiro. O que gostaria de fazer com essa movimentação?
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => handleConfirmUnpay(true)}
+                className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/10 active:scale-95 cursor-pointer"
+                disabled={unpaying}
+              >
+                {unpaying ? (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Sim, excluir despesa
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmUnpay(false)}
+                className="w-full bg-slate-850 hover:bg-slate-800 text-slate-300 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                disabled={unpaying}
+              >
+                Não, manter despesa (desvincular)
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsUnpayModalOpen(false); setUnpayingConta(null); }}
+                className="w-full bg-transparent hover:bg-slate-900/40 text-slate-400 hover:text-slate-300 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                disabled={unpaying}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

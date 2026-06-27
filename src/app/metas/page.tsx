@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 import { 
   Target, 
@@ -17,19 +16,13 @@ import {
 } from 'lucide-react'
 import Loader from '@/components/Loader'
 import { toast } from 'sonner'
-
-interface Meta {
-  id: string
-  nome: string
-  valor_meta: number
-  valor_atual: number // Calculado dinamicamente
-}
+import { goalService, MetaConsolidated } from '@/services/goal.service'
 
 export default function MetasPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
-  const [metas, setMetas] = useState<Meta[]>([])
+  const [metas, setMetas] = useState<MetaConsolidated[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [isFormOpen, setIsFormOpen] = useState(false)
   
@@ -55,36 +48,12 @@ export default function MetasPage() {
     if (!user || !profile) return
     setDataLoading(true)
     try {
-      // 1. Buscar todas as metas do usuário
-      const { data: metasData, error: metasError } = await supabase
-        .from('finance_metas')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-
-      if (metasError) throw metasError
-
-      // 2. Buscar depósitos de metas (seguro via RLS)
-      const { data: depositsData, error: depositsError } = await supabase
-        .from('finance_goal_deposits')
-        .select('meta_id, valor')
-
-      if (depositsError) throw depositsError
-
-      // 3. Mapear e consolidar os valores atuais (somatória de depósitos)
-      const depositsMap: { [metaId: string]: number } = {}
-      ;(depositsData || []).forEach((dep) => {
-        depositsMap[dep.meta_id] = (depositsMap[dep.meta_id] || 0) + Number(dep.valor)
-      })
-
-      const consolidatedMetas = (metasData || []).map((meta: any) => ({
-        id: meta.id,
-        nome: meta.nome,
-        valor_meta: Number(meta.valor_meta),
-        valor_atual: depositsMap[meta.id] || 0
-      }))
-
-      setMetas(consolidatedMetas)
+      const result = await goalService.getMetas(user.id)
+      if (result.success && result.data) {
+        setMetas(result.data)
+      } else if (result.error) {
+        toast.error(result.error)
+      }
     } catch (err) {
       console.error('Error fetching metas:', err)
       toast.error('Erro ao carregar metas.')
@@ -105,10 +74,10 @@ export default function MetasPage() {
     setIsFormOpen(true)
   }
 
-  const handleOpenEditForm = (meta: Meta) => {
+  const handleOpenEditForm = (meta: MetaConsolidated) => {
     setEditingId(meta.id)
     setNome(meta.nome)
-    setValorMeta(meta.valor_meta.toString())
+    setValorMeta(meta.valorMeta.toString())
     setIsFormOpen(true)
   }
 
@@ -131,52 +100,34 @@ export default function MetasPage() {
     setSubmitting(true)
     try {
       if (editingId) {
-        // Edit Mode (Apenas nome e valor alvo)
-        const { error } = await supabase
-          .from('finance_metas')
-          .update({
-            nome: nome.trim(),
-            valor_meta: Number(valorMeta)
-          })
-          .eq('id', editingId)
-
-        if (error) throw error
-        toast.success('Meta atualizada com sucesso!')
+        // Edit Mode
+        const result = await goalService.updateMeta(editingId, user!.id, nome.trim(), Number(valorMeta))
+        if (result.success) {
+          toast.success('Meta atualizada com sucesso!')
+          handleCloseForm()
+          await loadMetas()
+        } else {
+          toast.error(result.error || 'Erro ao atualizar meta.')
+        }
       } else {
         // Create Mode
-        const { data: newMeta, error: metaErr } = await supabase
-          .from('finance_metas')
-          .insert({
-            user_id: user?.id,
-            nome: nome.trim(),
-            valor_meta: Number(valorMeta)
-          })
-          .select()
-          .single()
-
-        if (metaErr) throw metaErr
-
-        // Se houver valor inicial guardado, registra o primeiro depósito
-        if (Number(valorInicial) > 0) {
-          const { error: depErr } = await supabase
-            .from('finance_goal_deposits')
-            .insert({
-              meta_id: newMeta.id,
-              valor: Number(valorInicial),
-              data: new Date().toISOString().split('T')[0]
-            })
-
-          if (depErr) throw depErr
+        const result = await goalService.createMeta(
+          user!.id,
+          nome.trim(),
+          Number(valorMeta),
+          Number(valorInicial)
+        )
+        if (result.success) {
+          toast.success('Meta criada!')
+          handleCloseForm()
+          await loadMetas()
+        } else {
+          toast.error(result.error || 'Erro ao criar meta.')
         }
-
-        toast.success('Meta criada!')
       }
-
-      handleCloseForm()
-      await loadMetas()
     } catch (err: any) {
       console.error('Error submitting meta:', err)
-      toast.error(err.message || 'Erro ao registrar meta.')
+      toast.error('Erro ao registrar meta.')
     } finally {
       setSubmitting(false)
     }
@@ -186,21 +137,20 @@ export default function MetasPage() {
     if (!confirm('Deseja realmente excluir esta meta?')) return
 
     try {
-      const { error } = await supabase
-        .from('finance_metas')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
-      toast.success('Meta excluída.')
-      await loadMetas()
+      const result = await goalService.deleteMeta(id, user!.id)
+      if (result.success) {
+        toast.success('Meta excluída.')
+        await loadMetas()
+      } else {
+        toast.error(result.error || 'Erro ao excluir meta.')
+      }
     } catch (err: any) {
       console.error('Error deleting meta:', err)
-      toast.error(err.message || 'Erro ao excluir meta.')
+      toast.error('Erro ao excluir meta.')
     }
   }
 
-  const handleQuickDeposit = async (meta: Meta) => {
+  const handleQuickDeposit = async (meta: MetaConsolidated) => {
     const amount = Number(depositAmount)
     if (isNaN(amount) || amount <= 0) {
       toast.error('Informe um valor de aporte válido.')
@@ -208,36 +158,40 @@ export default function MetasPage() {
     }
 
     setDepositing(true)
-    const newTotal = Number(meta.valor_atual) + amount
+    const newTotal = Number(meta.valorAtual) + amount
 
     // Optimistic Update
     setMetas(prev => 
-      prev.map(m => m.id === meta.id ? { ...m, valor_atual: newTotal } : m)
+      prev.map(m => m.id === meta.id ? { ...m, valorAtual: newTotal } : m)
     )
 
     try {
-      // Registrar o aporte inserindo uma movimentação de depósito
-      const { error } = await supabase
-        .from('finance_goal_deposits')
-        .insert({
-          meta_id: meta.id,
-          valor: amount,
-          data: new Date().toISOString().split('T')[0]
-        })
+      const result = await goalService.depositToMeta(
+        meta.id,
+        user!.id,
+        amount,
+        new Date().toISOString().split('T')[0]
+      )
 
-      if (error) throw error
-      
-      toast.success(`Aporte de ${formatCurrency(amount, profile?.moeda)} realizado!`)
-      setDepositAmount('')
-      setActiveDepositId(null)
-      await loadMetas() // Sincronizar dados reais
+      if (result.success) {
+        toast.success(`Aporte de ${formatCurrency(amount, profile?.moeda)} realizado!`)
+        setDepositAmount('')
+        setActiveDepositId(null)
+        await loadMetas()
+      } else {
+        // Revert on business error
+        setMetas(prev => 
+          prev.map(m => m.id === meta.id ? { ...m, valorAtual: meta.valorAtual } : m)
+        )
+        toast.error(result.error || 'Erro ao registrar aporte.')
+      }
     } catch (err: any) {
-      // Reverter em caso de erro
+      // Revert on exception
       setMetas(prev => 
-        prev.map(m => m.id === meta.id ? { ...m, valor_atual: meta.valor_atual } : m)
+        prev.map(m => m.id === meta.id ? { ...m, valorAtual: meta.valorAtual } : m)
       )
       console.error('Error updating meta value:', err)
-      toast.error(err.message || 'Erro ao registrar aporte.')
+      toast.error('Erro ao registrar aporte.')
     } finally {
       setDepositing(false)
     }
@@ -378,7 +332,7 @@ export default function MetasPage() {
           </div>
         ) : (
           metas.map((meta) => {
-            const pct = Math.min(100, Math.round((meta.valor_atual / meta.valor_meta) * 100)) || 0
+            const pct = Math.min(100, Math.round((meta.valorAtual / meta.valorMeta) * 100)) || 0
             const isDepositOpen = activeDepositId === meta.id
 
             return (
@@ -397,7 +351,7 @@ export default function MetasPage() {
                     <div>
                       <h3 className="text-sm font-bold text-slate-200">{meta.nome}</h3>
                       <p className="text-[10px] text-slate-400 font-medium">
-                        Meta: {formatCurrency(meta.valor_meta, currencySymbol)}
+                        Meta: {formatCurrency(meta.valorMeta, currencySymbol)}
                       </p>
                     </div>
                   </div>
@@ -425,7 +379,7 @@ export default function MetasPage() {
                   <span className="text-xs text-slate-400 font-medium">Progresso acumulado</span>
                   <div className="flex items-center gap-1">
                     <span className="text-sm font-extrabold text-emerald-400">
-                      {formatCurrency(meta.valor_atual, currencySymbol)}
+                      {formatCurrency(meta.valorAtual, currencySymbol)}
                     </span>
                     <span className="text-[10px] text-slate-500">
                       ({pct}%)

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/utils'
 import { 
   TrendingDown, 
@@ -20,34 +19,12 @@ import {
 } from 'lucide-react'
 import Loader from '@/components/Loader'
 import { toast } from 'sonner'
-
-interface Despesa {
-  id: string
-  valor: number
-  categoria_id: string
-  account_id: string
-  descricao: string
-  forma_pagamento: string
-  data: string
-  finance_categories?: {
-    nome: string
-    cor: string
-  } | null
-  finance_accounts?: {
-    nome: string
-  } | null
-}
-
-interface Categoria {
-  id: string
-  nome: string
-  cor: string
-}
-
-interface ContaFinanceira {
-  id: string
-  nome: string
-}
+import { movementService } from '@/services/movement.service'
+import { accountService } from '@/services/account.service'
+import { categoryService } from '@/services/category.service'
+import { Movement } from '@/repositories/movement.repository'
+import { Category } from '@/repositories/category.repository'
+import { Account } from '@/repositories/account.repository'
 
 const FORMAS_PAGAMENTO = ['Dinheiro', 'Cartão de Débito', 'Cartão de Crédito', 'Pix', 'Boleto', 'Outro']
 
@@ -55,9 +32,9 @@ export default function DespesasPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
-  const [despesas, setDespesas] = useState<Despesa[]>([])
-  const [categorias, setCategorias] = useState<Categoria[]>([])
-  const [contas, setContas] = useState<ContaFinanceira[]>([])
+  const [despesas, setDespesas] = useState<Movement[]>([])
+  const [categorias, setCategorias] = useState<Category[]>([])
+  const [contas, setContas] = useState<Account[]>([])
   
   const [dataLoading, setDataLoading] = useState(true)
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -87,53 +64,38 @@ export default function DespesasPage() {
       const startDateStr = startDate.toISOString().split('T')[0]
       const endDateStr = endDate.toISOString().split('T')[0]
 
-      // 1. Fetch categories for despesas (both system-default where user_id is null and user's private)
-      const { data: catList } = await supabase
-        .from('finance_categories')
-        .select('id, nome, cor')
-        .or(`user_id.is.null,user_id.eq.${user.id}`)
-        .in('tipo', ['despesa', 'ambos'])
-        .order('ordem', { ascending: true })
-      
-      setCategorias(catList || [])
-      if (catList && catList.length > 0) {
-        setCategoriaId(catList[0].id)
+      // 1. Fetch categories for despesas
+      const catResult = await categoryService.getCategoriesByType(user.id, 'despesa')
+      if (catResult.success && catResult.data) {
+        setCategorias(catResult.data)
+        if (catResult.data.length > 0) {
+          setCategoriaId(catResult.data[0].id)
+        }
+      } else if (catResult.error) {
+        toast.error(catResult.error)
       }
 
-      // 2. Fetch accounts (only active accounts)
-      const { data: accList } = await supabase
-        .from('finance_accounts')
-        .select('id, nome')
-        .eq('user_id', user.id)
-        .eq('ativo', true)
-      
-      setContas(accList || [])
-      if (accList && accList.length > 0) {
-        setAccountId(accList[0].id)
+      // 2. Fetch accounts
+      const accResult = await accountService.getActiveAccounts(user.id)
+      if (accResult.success && accResult.data) {
+        setContas(accResult.data)
+        if (accResult.data.length > 0) {
+          setAccountId(accResult.data[0].id)
+        }
+      } else if (accResult.error) {
+        toast.error(accResult.error)
       }
 
-      // 3. Fetch movements (tipo = 'despesa')
-      const { data: list, error } = await supabase
-        .from('finance_movements')
-        .select(`
-          id,
-          valor,
-          categoria_id,
-          account_id,
-          descricao,
-          forma_pagamento,
-          data,
-          finance_categories:categoria_id (nome, cor),
-          finance_accounts:account_id (nome)
-        `)
-        .eq('user_id', user.id)
-        .eq('tipo', 'despesa')
-        .gte('data', startDateStr)
-        .lte('data', endDateStr)
-        .order('data', { ascending: false })
-
-      if (error) throw error
-      setDespesas((list as any[]) || [])
+      // 3. Fetch movements
+      const movResult = await movementService.getMovements(user.id, 'despesa', {
+        startDate: startDateStr,
+        endDate: endDateStr
+      })
+      if (movResult.success && movResult.data) {
+        setDespesas(movResult.data)
+      } else if (movResult.error) {
+        toast.error(movResult.error)
+      }
     } catch (err) {
       console.error('Error fetching data:', err)
       toast.error('Erro ao carregar despesas.')
@@ -157,12 +119,12 @@ export default function DespesasPage() {
     setIsFormOpen(true)
   }
 
-  const handleOpenEditForm = (desp: Despesa) => {
+  const handleOpenEditForm = (desp: Movement) => {
     setEditingId(desp.id)
     setValor(desp.valor.toString())
-    setCategoriaId(desp.categoria_id)
-    setAccountId(desp.account_id)
-    setFormaPagamento(desp.forma_pagamento)
+    setCategoriaId(desp.categoriaId || '')
+    setAccountId(desp.accountId)
+    setFormaPagamento(desp.formaPagamento)
     setDescricao(desp.descricao || '')
     setData(desp.data)
     setIsFormOpen(true)
@@ -192,44 +154,47 @@ export default function DespesasPage() {
     try {
       if (editingId) {
         // Edit Mode
-        const { error } = await supabase
-          .from('finance_movements')
-          .update({
-            valor: Number(valor),
-            categoria_id: categoriaId,
-            account_id: accountId,
-            forma_pagamento: formaPagamento,
-            descricao,
-            data
-          })
-          .eq('id', editingId)
+        const result = await movementService.updateMovement(editingId, user!.id, {
+          valor: Number(valor),
+          categoriaId: categoriaId,
+          accountId: accountId,
+          formaPagamento: formaPagamento,
+          descricao: descricao.trim() || null,
+          data
+        })
 
-        if (error) throw error
-        toast.success('Despesa atualizada!')
+        if (result.success) {
+          toast.success('Despesa atualizada!')
+          handleCloseForm()
+          await loadInitialData()
+        } else {
+          toast.error(result.error || 'Erro ao atualizar despesa.')
+        }
       } else {
         // Create Mode
-        const { error } = await supabase
-          .from('finance_movements')
-          .insert({
-            user_id: user?.id,
-            tipo: 'despesa',
-            valor: Number(valor),
-            categoria_id: categoriaId,
-            account_id: accountId,
-            forma_pagamento: formaPagamento,
-            descricao,
-            data
-          })
+        const result = await movementService.createMovement({
+          userId: user!.id,
+          tipo: 'despesa',
+          valor: Number(valor),
+          categoriaId: categoriaId,
+          accountId: accountId,
+          formaPagamento: formaPagamento,
+          descricao: descricao.trim() || null,
+          data,
+          origem: 'manual'
+        })
 
-        if (error) throw error
-        toast.success('Despesa registrada!')
+        if (result.success) {
+          toast.success('Despesa registrada!')
+          handleCloseForm()
+          await loadInitialData()
+        } else {
+          toast.error(result.error || 'Erro ao registrar despesa.')
+        }
       }
-
-      handleCloseForm()
-      await loadInitialData()
     } catch (err: any) {
       console.error('Error submitting despesa:', err)
-      toast.error(err.message || 'Erro ao registrar despesa.')
+      toast.error('Erro ao registrar despesa.')
     } finally {
       setSubmitting(false)
     }
@@ -239,17 +204,16 @@ export default function DespesasPage() {
     if (!confirm('Deseja realmente excluir esta despesa?')) return
 
     try {
-      const { error } = await supabase
-        .from('finance_movements')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
-      toast.success('Despesa excluída.')
-      await loadInitialData()
+      const result = await movementService.deleteMovement(id, user!.id)
+      if (result.success) {
+        toast.success('Despesa excluída.')
+        await loadInitialData()
+      } else {
+        toast.error(result.error || 'Erro ao excluir despesa.')
+      }
     } catch (err: any) {
       console.error('Error deleting despesa:', err)
-      toast.error(err.message || 'Erro ao excluir despesa.')
+      toast.error('Erro ao excluir despesa.')
     }
   }
 
@@ -258,7 +222,7 @@ export default function DespesasPage() {
   }
 
   const currencySymbol = profile.moeda || 'R$'
-  const totalDespesas = despesas.reduce((sum, d) => sum + Number(d.valor), 0)
+  const totalDespesas = despesas.reduce((sum, d) => sum + d.valor, 0)
 
   return (
     <main className="container max-w-lg mx-auto px-4 pt-6 pb-20 animate-fade-in">
@@ -475,9 +439,9 @@ export default function DespesasPage() {
           </div>
         ) : (
           despesas.map((desp) => {
-            const catName = desp.finance_categories?.nome || 'Outros'
-            const catColor = desp.finance_categories?.cor || '#f43f5e'
-            const accName = desp.finance_accounts?.nome || 'Carteira'
+            const catName = desp.financeCategories?.nome || 'Outros'
+            const catColor = desp.financeCategories?.cor || '#f43f5e'
+            const accName = desp.financeAccounts?.nome || 'Carteira'
 
             return (
               <div 
@@ -499,7 +463,7 @@ export default function DespesasPage() {
                       {desp.descricao || catName}
                     </h3>
                     <p className="text-[10px] text-slate-400">
-                      {catName} • {accName} • {desp.forma_pagamento} • {formatDateLabel(desp.data)}
+                      {catName} • {accName} • {desp.formaPagamento} • {formatDateLabel(desp.data)}
                     </p>
                   </div>
                 </div>

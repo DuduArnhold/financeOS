@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/utils'
 import { 
   Wallet, 
@@ -12,40 +11,28 @@ import {
   AlertCircle, 
   PiggyBank, 
   PlusCircle, 
-  ArrowRight,
   TrendingUp,
   TrendingDown
 } from 'lucide-react'
 import Link from 'next/link'
 import Loader from '@/components/Loader'
 import { toast } from 'sonner'
-
-interface Transaction {
-  id: string
-  valor: number
-  descricao: string
-  data: string
-  tipo: 'receita' | 'despesa'
-  forma_pagamento: string
-  finance_categories?: {
-    nome: string
-    cor: string
-    icone: string
-  } | null
-}
+import { dashboardService, DashboardSummary } from '@/services/dashboard.service'
+import { movementService } from '@/services/movement.service'
+import { Movement } from '@/repositories/movement.repository'
 
 export default function Dashboard() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
-  const [dashboardData, setDashboardData] = useState({
+  const [dashboardData, setDashboardData] = useState<DashboardSummary>({
     saldoAtual: 0,
     receitasMes: 0,
     despesasMes: 0,
     contasPendentes: 0,
     economiaMes: 0,
   })
-  const [latestTransactions, setLatestTransactions] = useState<Transaction[]>([])
+  const [latestTransactions, setLatestTransactions] = useState<Movement[]>([])
   const [dataLoading, setDataLoading] = useState(true)
 
   useEffect(() => {
@@ -63,92 +50,26 @@ export default function Dashboard() {
         const closingDay = profile.fechamento_dia || 30
         const { startDate, endDate } = getBillingCycleRange(closingDay)
         
-        // Format dates as YYYY-MM-DD for PG comparison
+        // Format dates as YYYY-MM-DD for comparison
         const startDateStr = startDate.toISOString().split('T')[0]
         const endDateStr = endDate.toISOString().split('T')[0]
 
-        // 1. Fetch ALL movements and paid bills to calculate real Saldo Atual
-        const [
-          { data: allMovements },
-          { data: allPaidBills }
-        ] = await Promise.all([
-          supabase.from('finance_movements').select('valor, tipo').eq('user_id', user.id),
-          supabase.from('finance_contas').select('valor').eq('user_id', user.id).eq('paga', true)
+        const [dashResult, txResult] = await Promise.all([
+          dashboardService.getDashboardSummary(user.id, { startDate: startDateStr, endDate: endDateStr }),
+          movementService.getMovements(user.id, undefined, undefined, 5)
         ])
 
-        const totalRevenues = (allMovements || [])
-          .filter(m => m.tipo === 'receita')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0)
+        if (dashResult.success && dashResult.data) {
+          setDashboardData(dashResult.data)
+        } else if (dashResult.error) {
+          toast.error(dashResult.error)
+        }
 
-        const totalExpenses = (allMovements || [])
-          .filter(m => m.tipo === 'despesa')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0)
-
-        const totalPaidBills = (allPaidBills || []).reduce((acc, curr) => acc + Number(curr.valor), 0)
-        
-        // Saldo Atual = Receitas de sempre - Despesas de sempre - Contas pagas de sempre
-        const saldoCalculado = totalRevenues - totalExpenses - totalPaidBills
-
-        // 2. Fetch current month metrics (within the cycle range) and pending bills
-        const [
-          { data: currentMovements },
-          { data: currentPendingBills }
-        ] = await Promise.all([
-          supabase.from('finance_movements')
-            .select('valor, tipo')
-            .eq('user_id', user.id)
-            .gte('data', startDateStr)
-            .lte('data', endDateStr),
-          supabase.from('finance_contas')
-            .select('valor')
-            .eq('user_id', user.id)
-            .eq('paga', false)
-        ])
-
-        const receitasMesSum = (currentMovements || [])
-          .filter(m => m.tipo === 'receita')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0)
-
-        const despesasMesSum = (currentMovements || [])
-          .filter(m => m.tipo === 'despesa')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0)
-
-        const contasPendentesSum = (currentPendingBills || []).reduce((acc, curr) => acc + Number(curr.valor), 0)
-        
-        // Economia do Mês = Receitas do Mês - Despesas do Mês
-        const economiaMesCalculada = receitasMesSum - despesasMesSum
-
-        setDashboardData({
-          saldoAtual: saldoCalculado,
-          receitasMes: receitasMesSum,
-          despesasMes: despesasMesSum,
-          contasPendentes: contasPendentesSum,
-          economiaMes: economiaMesCalculada,
-        })
-
-        // 3. Fetch latest transactions (5 items) joined with categories
-        const { data: recentMovements, error: txError } = await supabase
-          .from('finance_movements')
-          .select(`
-            id,
-            valor,
-            descricao,
-            data,
-            tipo,
-            forma_pagamento,
-            finance_categories:categoria_id (
-              nome,
-              cor,
-              icone
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('data', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(5)
-
-        if (txError) throw txError
-        setLatestTransactions((recentMovements as any[]) || [])
+        if (txResult.success && txResult.data) {
+          setLatestTransactions(txResult.data)
+        } else if (txResult.error) {
+          toast.error(txResult.error)
+        }
       } catch (err) {
         console.error('Error loading dashboard data:', err)
         toast.error('Erro ao atualizar o painel.')
@@ -272,8 +193,8 @@ export default function Dashboard() {
           ) : (
             latestTransactions.map((tx) => {
               const isReceita = tx.tipo === 'receita'
-              const catName = tx.finance_categories?.nome || 'Outros'
-              const catColor = tx.finance_categories?.cor || '#94a3b8'
+              const catName = tx.financeCategories?.nome || 'Outros'
+              const catColor = tx.financeCategories?.cor || '#94a3b8'
 
               return (
                 <div 
