@@ -6,7 +6,7 @@ import { useAuth }   from '@/context/AuthContext'
 import { useToast }  from '@/context/ToastContext'
 import { useDialog } from '@/context/DialogContext'
 import { useTheme }  from '@/context/ThemeContext'
-import { supabase }  from '@/lib/supabase'
+import { profileService } from '@/services/profile.service'
 import { User, Coins, Calendar, Sun, Moon, LogOut, Save, Laptop } from 'lucide-react'
 
 import { AppShell }       from '@/components/layout/AppShell'
@@ -69,37 +69,27 @@ export default function PerfilPage() {
     setSaving(true)
     setSubmitState('loading')
     try {
-      // 1. Atualizar nome na tabela profiles
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ nome: nome.trim() })
-        .eq('id', user?.id)
+      const result = await profileService.updateProfileAndSettings(
+        user!.id,
+        { nome },
+        { moeda, fechamentoDia: day, tema }
+      )
 
-      if (profileError) throw profileError
-
-      // 2. Atualizar configurações na tabela settings
-      const { error: settingsError } = await supabase
-        .from('settings')
-        .update({
-          moeda,
-          fechamento_dia: day,
-          tema
-        })
-        .eq('user_id', user?.id)
-
-      if (settingsError) throw settingsError
-      
-      // 3. Atualizar tema local através do ThemeContext
-      setTheme(tema)
-
-      await refreshProfile()
-      setSubmitState('success')
-      toast.success('Configurações atualizadas!')
-      setTimeout(() => setSubmitState('idle'), 1000)
+      if (result.success) {
+        setTheme(tema)
+        await refreshProfile()
+        setSubmitState('success')
+        toast.success('Configurações atualizadas!')
+        setTimeout(() => setSubmitState('idle'), 1000)
+      } else {
+        setSubmitState('error')
+        toast.error(result.error || 'Erro ao salvar configurações.')
+        setTimeout(() => setSubmitState('idle'), 2000)
+      }
     } catch (err: any) {
       console.error('Error saving profile settings:', err)
       setSubmitState('error')
-      toast.error(err.message || 'Erro ao salvar configurações.')
+      toast.error('Erro ao salvar configurações.')
       setTimeout(() => setSubmitState('idle'), 2000)
     } finally {
       setSaving(false)

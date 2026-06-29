@@ -37,12 +37,13 @@ export default function ReceitasPage() {
   const dialog = useDialog()
   const router = useRouter()
 
-  const [receitas,    setReceitas]    = useState<Movement[]>([])
-  const [categorias,  setCategorias]  = useState<Category[]>([])
-  const [contas,      setContas]      = useState<Account[]>([])
-  const [dataLoading, setDataLoading] = useState(true)
-  const [sheetOpen,   setSheetOpen]   = useState(false)
-  const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [receitas,         setReceitas]        = useState<Movement[]>([])
+  const [categorias,       setCategorias]      = useState<Category[]>([])
+  const [contas,           setContas]          = useState<Account[]>([])
+  const [dataLoading,      setDataLoading]     = useState(true)
+  const [sheetOpen,        setSheetOpen]       = useState(false)
+  const [submitState,      setSubmitState]     = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [filtroAccountId,  setFiltroAccountId] = useState('all')
 
   // Form
   const [editingId,   setEditingId]   = useState<string | null>(null)
@@ -146,7 +147,14 @@ export default function ReceitasPage() {
   }, [dialog, toast, user, load])
 
   const currency    = profile?.moeda || 'R$'
-  const totalReceitas = useMemo(() => receitas.reduce((s, r) => s + r.valor, 0), [receitas])
+
+  // Computed and filtered values
+  const filteredReceitas = useMemo(() => {
+    if (filtroAccountId === 'all') return receitas
+    return receitas.filter(r => r.accountId === filtroAccountId)
+  }, [receitas, filtroAccountId])
+
+  const totalReceitas = useMemo(() => filteredReceitas.reduce((s, r) => s + r.valor, 0), [filteredReceitas])
   const catOptions    = useMemo(() => categorias.map(c => ({ value: c.id, label: c.nome })), [categorias])
   const accOptions    = useMemo(() => contas.map(a => ({ value: a.id, label: a.nome })),     [contas])
 
@@ -177,32 +185,54 @@ export default function ReceitasPage() {
           </p>
         </KPIWidget>
 
+        {/* Filter bar */}
+        {!dataLoading && contas.length > 0 && receitas.length > 0 && (
+          <div className="flex items-center justify-between mb-3.5 px-1 animate-fade-in-fast">
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)]">
+              Registros do ciclo
+            </span>
+            <select
+              value={filtroAccountId}
+              onChange={e => setFiltroAccountId(e.target.value)}
+              className="py-1.5 px-2.5 rounded-xl text-xs font-semibold glass-input bg-slate-900 border-slate-800 text-[var(--color-text-secondary)] cursor-pointer outline-none hover:border-slate-700 transition-colors"
+            >
+              <option value="all">Todas as contas</option>
+              {contas.map(acc => (
+                <option key={acc.id} value={acc.id} className="bg-slate-900">{acc.nome}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* List */}
         {dataLoading ? (
           <Card className="p-5"><SkeletonTable rows={5} /></Card>
-        ) : receitas.length === 0 ? (
+        ) : filteredReceitas.length === 0 ? (
           <Card className="p-2">
             <EmptyState
               icon="💰"
               title="Nenhuma receita registrada"
-              description="Registre sua primeira entrada deste ciclo de faturamento."
+              description={filtroAccountId === 'all' 
+                ? "Registre sua primeira entrada deste ciclo de faturamento."
+                : "Nenhuma receita registrada nesta conta neste ciclo."
+              }
               actionLabel="Nova Receita"
               onAction={openNew}
             />
           </Card>
         ) : (
           <Card className="p-1 divide-y divide-slate-800/40">
-            {receitas.map((rec) => {
-              const catName  = rec.financeCategories?.nome || 'Outros'
-              const catColor = rec.financeCategories?.cor  || '#10b981'
+            {filteredReceitas.map((rec) => {
+              const catName  = rec.financeCategories?.nome || 'Transferência'
+              const catColor = rec.financeCategories?.cor  || '#818cf8'
               const accName  = rec.financeAccounts?.nome   || 'Carteira'
               return (
                 <ActionRow
                   key={rec.id}
-                  onEdit={() => openEdit(rec)}
+                  onEdit={rec.origem !== 'transferencia' ? () => openEdit(rec) : undefined}
                   onDelete={() => handleDelete(rec.id)}
                 >
-                  <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center justify-between p-4 select-none">
                     <div className="flex items-center gap-3 min-w-0">
                       <div
                         className="p-2 rounded-xl flex-shrink-0"

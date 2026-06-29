@@ -1,7 +1,9 @@
 import { movementRepository, Movement } from '@/repositories/movement.repository'
 import { contaRepository, Conta }       from '@/repositories/conta.repository'
 import { metaRepository }               from '@/repositories/meta.repository'
+import { accountRepository, Account }   from '@/repositories/account.repository'
 import { MetaConsolidated }             from '@/services/goal.service'
+import { logger }                       from '@/lib/logger'
 
 // ─── Date Range ───────────────────────────────────────────────────────────────
 
@@ -14,6 +16,10 @@ export interface DateRange {
 // Representa um retrato do momento financeiro do usuário.
 // Futuramente: DashboardHistory, DashboardForecast, DashboardComparison.
 
+export interface DashboardAccountSnapshot extends Account {
+  balance: number
+}
+
 export interface DashboardSnapshot {
   summary: {
     saldoAtual:   number
@@ -24,6 +30,7 @@ export interface DashboardSnapshot {
   nextBill:       Conta | null
   nearestGoal:    (MetaConsolidated & { progressPct: number }) | null
   lastMovement:   Movement | null
+  accounts:       DashboardAccountSnapshot[]
 }
 
 // ─── Repository Interface ─────────────────────────────────────────────────────
@@ -94,6 +101,27 @@ class SupabaseDashboardRepository implements DashboardRepository {
     const lastMovement = [...allMovements]
       .sort((a, b) => b.data.localeCompare(a.data))[0] ?? null
 
+    // 6. Carregar contas financeiras e calcular seus saldos reais dinamicamente
+    const activeAccounts = await accountRepository.getActiveAccounts(userId)
+    
+    // Mapear saldo acumulado por conta
+    const accountsWithBalance: DashboardAccountSnapshot[] = activeAccounts.map(acc => {
+      const accountMovements = allMovements.filter(m => m.accountId === acc.id)
+      
+      const revenues = accountMovements
+        .filter(m => m.tipo === 'receita')
+        .reduce((sum, m) => sum + m.valor, 0)
+        
+      const expenses = accountMovements
+        .filter(m => m.tipo === 'despesa')
+        .reduce((sum, m) => sum + m.valor, 0)
+        
+      return {
+        ...acc,
+        balance: acc.saldoInicial + revenues - expenses
+      }
+    })
+
     return {
       summary: {
         saldoAtual:  totalRevenues - totalExpenses,
@@ -104,6 +132,7 @@ class SupabaseDashboardRepository implements DashboardRepository {
       nextBill,
       nearestGoal,
       lastMovement,
+      accounts: accountsWithBalance
     }
   }
 }
@@ -122,7 +151,7 @@ export const dashboardService = {
       const data = await repository.getSnapshot(userId, range)
       return { success: true, data }
     } catch (err: any) {
-      console.error('dashboardService.getSnapshot error:', err)
+      logger.error('dashboardService.getSnapshot error', { error: err })
       return { success: false, error: err.message || 'Erro ao calcular resumo do painel.' }
     }
   }

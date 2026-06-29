@@ -1,4 +1,6 @@
 import { contaRepository, Conta } from '@/repositories/conta.repository'
+import { logger } from '@/lib/logger'
+import { eventBus } from '@/lib/event-bus'
 
 export interface ServiceResult<T> {
   success: boolean
@@ -12,7 +14,7 @@ export const contaService = {
       const data = await contaRepository.getAll(userId)
       return { success: true, data }
     } catch (err: any) {
-      console.error('Error in getContas service:', err)
+      logger.error('Error in getContas service:', err)
       return { success: false, error: err.message || 'Erro ao carregar contas.' }
     }
   },
@@ -46,7 +48,7 @@ export const contaService = {
       })
       return { success: true, data: newConta }
     } catch (err: any) {
-      console.error('Error in createConta service:', err)
+      logger.error('Error in createConta service:', err)
       return { success: false, error: err.message || 'Erro ao criar conta.' }
     }
   },
@@ -78,7 +80,7 @@ export const contaService = {
       })
       return { success: true, data: updated }
     } catch (err: any) {
-      console.error('Error in updateConta service:', err)
+      logger.error('Error in updateConta service:', err)
       return { success: false, error: err.message || 'Erro ao atualizar conta.' }
     }
   },
@@ -88,7 +90,7 @@ export const contaService = {
       await contaRepository.softDelete(id, userId)
       return { success: true }
     } catch (err: any) {
-      console.error('Error in deleteConta service:', err)
+      logger.error('Error in deleteConta service:', err)
       return { success: false, error: err.message || 'Erro ao excluir conta.' }
     }
   },
@@ -125,9 +127,24 @@ export const contaService = {
         data,
         observacao || 'Pagamento de conta'
       )
+
+      // Get bill value to emit event
+      const contas = await contaRepository.getAll(userId)
+      const target = contas.find(c => c.id === contaId)
+      const billValue = target ? target.valor : 0
+
+      // Emit event with eventId and version
+      eventBus.publish('BILL_PAID', {
+        eventId: crypto.randomUUID(),
+        version: 1,
+        userId,
+        id: contaId,
+        valor: billValue
+      })
+
       return { success: true }
     } catch (err: any) {
-      console.error('Error in payConta service:', err)
+      logger.error('Error in payConta service:', err)
       return { success: false, error: err.message || 'Erro ao efetuar pagamento da conta.' }
     }
   },
@@ -135,9 +152,18 @@ export const contaService = {
   async unpayConta(contaId: string, userId: string, deleteMovement: boolean): Promise<ServiceResult<void>> {
     try {
       await contaRepository.unpay(contaId, userId, deleteMovement)
+      
+      // Emit event with eventId and version
+      eventBus.publish('BILL_UNPAID', {
+        eventId: crypto.randomUUID(),
+        version: 1,
+        userId,
+        id: contaId
+      })
+
       return { success: true }
     } catch (err: any) {
-      console.error('Error in unpayConta service:', err)
+      logger.error('Error in unpayConta service:', err)
       return { success: false, error: err.message || 'Erro ao reverter pagamento da conta.' }
     }
   }

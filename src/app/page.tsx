@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
@@ -8,18 +8,25 @@ import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/uti
 import {
   Wallet, ArrowUpRight, ArrowDownRight, PiggyBank,
   CalendarClock, Target, TrendingUp, TrendingDown,
-  PlusCircle, RefreshCw
+  PlusCircle, RefreshCw, ArrowLeftRight, DollarSign, Calendar, MessageSquare
 } from 'lucide-react'
 import Link from 'next/link'
 import { AppShell }  from '@/components/layout/AppShell'
 import { PageHeader, PageTitle } from '@/components/layout/PageHeader'
 import { Card }      from '@/components/ui/Card'
 import { Badge }     from '@/components/ui/Badge'
+import { Button }    from '@/components/ui/Button'
+import { Input }     from '@/components/ui/Input'
+import { Select }    from '@/components/ui/Select'
 import { KPIWidget, InfoWidget } from '@/components/finance/Widgets'
 import { PullRefresh } from '@/components/mobile/PullRefresh'
 import { SkeletonCard, SkeletonTable } from '@/components/feedback/Skeletons'
 import { EmptyState } from '@/components/feedback/EmptyState'
+import { BottomSheet } from '@/components/feedback/BottomSheet'
 import { dashboardService, DashboardSnapshot } from '@/services/dashboard.service'
+import { transferService } from '@/services/transfer.service'
+
+const TODAY = new Date().toISOString().split('T')[0]
 
 // ─── Skeleton do Dashboard ────────────────────────────────────────────────────
 
@@ -62,6 +69,15 @@ export default function Dashboard() {
   const [snapshot,     setSnapshot]     = useState<DashboardSnapshot | null>(null)
   const [dataLoading,  setDataLoading]  = useState(true)
 
+  // Transfer sheet states
+  const [transferSheetOpen,   setTransferSheetOpen]   = useState(false)
+  const [origemAccountId,    setOrigemAccountId]    = useState('')
+  const [destinoAccountId,   setDestinoAccountId]   = useState('')
+  const [transferValor,      setTransferValor]      = useState('')
+  const [transferData,       setTransferData]       = useState(TODAY)
+  const [transferDescricao,  setTransferDescricao]  = useState('')
+  const [transferSubmitState,setTransferSubmitState]= useState<'idle'|'loading'|'success'|'error'>('idle')
+
   useEffect(() => {
     if (!loading && !user) router.push('/login')
   }, [user, loading, router])
@@ -77,8 +93,11 @@ export default function Dashboard() {
         endDate:   endDate.toISOString().split('T')[0],
       }
       const result = await dashboardService.getSnapshot(user.id, range)
-      if (result.success) setSnapshot(result.data)
-      else toast.error(result.error)
+      if (result.success) {
+        setSnapshot(result.data)
+      } else {
+        toast.error(result.error)
+      }
     } catch {
       toast.error('Erro ao carregar painel.')
     } finally {
@@ -88,10 +107,73 @@ export default function Dashboard() {
 
   useEffect(() => { load() }, [load])
 
-  if (loading || dataLoading || !profile) return <DashboardSkeleton />
+  const openTransfer = useCallback(() => {
+    setTransferValor('')
+    setTransferDescricao('')
+    setTransferData(TODAY)
+    if (snapshot?.accounts && snapshot.accounts.length >= 2) {
+      setOrigemAccountId(snapshot.accounts[0].id)
+      setDestinoAccountId(snapshot.accounts[1].id)
+    } else if (snapshot?.accounts && snapshot.accounts.length > 0) {
+      setOrigemAccountId(snapshot.accounts[0].id)
+      setDestinoAccountId('')
+    }
+    setTransferSheetOpen(true)
+  }, [snapshot])
 
-  const currency = profile.moeda || 'R$'
+  const handleTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!transferValor || Number(transferValor) <= 0) {
+      toast.error('Informe um valor maior que zero.')
+      return
+    }
+    if (!origemAccountId || !destinoAccountId) {
+      toast.error('Selecione as contas de origem e destino.')
+      return
+    }
+    if (origemAccountId === destinoAccountId) {
+      toast.error('As contas de origem e destino devem ser diferentes.')
+      return
+    }
+
+    setTransferSubmitState('loading')
+    try {
+      const result = await transferService.createTransfer(
+        user!.id,
+        origemAccountId,
+        destinoAccountId,
+        Number(transferValor),
+        transferData,
+        transferDescricao.trim() || null
+      )
+      if (result.success) {
+        setTransferSubmitState('success')
+        toast.success('Transferência concluída!')
+        setTimeout(() => {
+          setTransferSheetOpen(false)
+          setTransferSubmitState('idle')
+          load()
+        }, 800)
+      } else {
+        setTransferSubmitState('error')
+        toast.error(result.error || 'Erro ao realizar transferência.')
+        setTimeout(() => setTransferSubmitState('idle'), 2000)
+      }
+    } catch {
+      setTransferSubmitState('error')
+      toast.error('Erro ao realizar transferência.')
+      setTimeout(() => setTransferSubmitState('idle'), 2000)
+    }
+  }
+
+  const currency = profile?.moeda || 'R$'
   const s = snapshot
+
+  const accountOptions = useMemo(() => {
+    return s?.accounts.map(acc => ({ value: acc.id, label: `${acc.nome} (${formatCurrency(acc.balance, currency)})` })) || []
+  }, [s, currency])
+
+  if (loading || dataLoading || !profile) return <DashboardSkeleton />
 
   return (
     <PullRefresh onRefresh={load}>
@@ -140,6 +222,41 @@ export default function Dashboard() {
             Ciclo de faturamento · Fechamento dia {profile.fechamento_dia}
           </p>
         </Card>
+
+        {/* Minhas Contas (Saldos por conta e transferência) */}
+        {s && s.accounts.length > 0 && (
+          <div className="mb-4 animate-fade-in">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] px-1">
+                Minhas Contas
+              </h2>
+              {s.accounts.length >= 2 && (
+                <button
+                  onClick={openTransfer}
+                  className="text-xs font-semibold text-indigo-450 hover:text-indigo-400 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  Transferir
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {s.accounts.map(acc => {
+                const color = acc.cor || '#6366f1'
+                return (
+                  <Card key={acc.id} className="p-4 relative overflow-hidden select-none">
+                    <div className="absolute top-0 right-0 w-2 h-full" style={{ backgroundColor: color }} />
+                    <p className="text-[9px] uppercase font-bold text-[var(--color-text-muted)] truncate max-w-[90%]">{acc.tipo}</p>
+                    <p className="text-xs font-bold text-[var(--color-text-primary)] mt-0.5 truncate max-w-[90%]">{acc.nome}</p>
+                    <p className="text-sm font-extrabold text-white mt-1.5">
+                      {formatCurrency(acc.balance, currency)}
+                    </p>
+                  </Card>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* KPI Grid */}
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -238,7 +355,6 @@ export default function Dashboard() {
               onAction={() => router.push('/receitas')}
             />
           ) : (
-            // Mostramos o lastMovement como preview — a lista completa está em Receitas/Despesas
             <div className="space-y-1">
               {[s.lastMovement].map((tx) => {
                 const isReceita = tx.tipo === 'receita'
@@ -259,7 +375,7 @@ export default function Dashboard() {
                         {tx.descricao || tx.financeCategories?.nome || 'Outros'}
                       </p>
                       <p className="text-[11px] text-[var(--color-text-secondary)]">
-                        {tx.financeCategories?.nome} · {formatDateLabel(tx.data)}
+                        {tx.financeCategories?.nome || 'Transferência'} · {tx.financeAccounts?.nome} · {formatDateLabel(tx.data)}
                       </p>
                     </div>
                     <span className={`text-sm font-bold flex-shrink-0 ${isReceita ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -278,6 +394,65 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
+
+        {/* Transfer BottomSheet */}
+        <BottomSheet
+          open={transferSheetOpen}
+          onClose={() => setTransferSheetOpen(false)}
+          title="Nova Transferência"
+        >
+          <form onSubmit={handleTransferSubmit} className="space-y-4">
+            <Select
+              label="Conta de origem (sai o dinheiro)"
+              options={accountOptions}
+              value={origemAccountId}
+              onChange={e => setOrigemAccountId(e.target.value)}
+              leftIcon={<PlusCircle className="w-4 h-4 text-rose-400" />}
+              required
+            />
+            <Select
+              label="Conta de destino (entra o dinheiro)"
+              options={accountOptions}
+              value={destinoAccountId}
+              onChange={e => setDestinoAccountId(e.target.value)}
+              leftIcon={<PlusCircle className="w-4 h-4 text-emerald-400" />}
+              required
+            />
+            <Input
+              label="Valor da transferência"
+              type="number" step="0.01" min="0.01"
+              value={transferValor}
+              onChange={e => setTransferValor(e.target.value)}
+              placeholder="0,00"
+              leftIcon={<DollarSign className="w-4 h-4 text-indigo-400" />}
+              required
+            />
+            <Input
+              label="Data da Transferência"
+              type="date"
+              value={transferData}
+              onChange={e => setTransferData(e.target.value)}
+              leftIcon={<Calendar className="w-4 h-4" />}
+              required
+            />
+            <Input
+              label="Descrição (opcional)"
+              type="text"
+              value={transferDescricao}
+              onChange={e => setTransferDescricao(e.target.value)}
+              placeholder="Ex: Reserva de emergência"
+              leftIcon={<MessageSquare className="w-4 h-4 text-slate-500" />}
+            />
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setTransferSheetOpen(false)} className="flex-1">
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" state={transferSubmitState} className="flex-1">
+                Confirmar
+              </Button>
+            </div>
+          </form>
+        </BottomSheet>
       </AppShell>
     </PullRefresh>
   )

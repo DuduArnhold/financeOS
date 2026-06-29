@@ -45,12 +45,13 @@ export default function DespesasPage() {
   const dialog = useDialog()
   const router = useRouter()
 
-  const [despesas,    setDespesas]    = useState<Movement[]>([])
-  const [categorias,  setCategorias]  = useState<Category[]>([])
-  const [contas,      setContas]      = useState<Account[]>([])
-  const [dataLoading, setDataLoading] = useState(true)
-  const [sheetOpen,   setSheetOpen]   = useState(false)
-  const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [despesas,        setDespesas]        = useState<Movement[]>([])
+  const [categorias,      setCategorias]      = useState<Category[]>([])
+  const [contas,          setContas]          = useState<Account[]>([])
+  const [dataLoading,      setDataLoading]     = useState(true)
+  const [sheetOpen,        setSheetOpen]       = useState(false)
+  const [submitState,      setSubmitState]     = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [filtroAccountId,  setFiltroAccountId] = useState('all')
 
   // Form State
   const [editingId,      setEditingId]      = useState<string | null>(null)
@@ -157,7 +158,14 @@ export default function DespesasPage() {
   }, [dialog, toast, user, load])
 
   const currency    = profile?.moeda || 'R$'
-  const totalDespesas = useMemo(() => despesas.reduce((s, r) => s + r.valor, 0), [despesas])
+
+  // Computed and filtered values
+  const filteredDespesas = useMemo(() => {
+    if (filtroAccountId === 'all') return despesas
+    return despesas.filter(d => d.accountId === filtroAccountId)
+  }, [despesas, filtroAccountId])
+
+  const totalDespesas = useMemo(() => filteredDespesas.reduce((s, r) => s + r.valor, 0), [filteredDespesas])
   const catOptions    = useMemo(() => categorias.map(c => ({ value: c.id, label: c.nome })), [categorias])
   const accOptions    = useMemo(() => contas.map(a => ({ value: a.id, label: a.nome })),     [contas])
 
@@ -188,32 +196,54 @@ export default function DespesasPage() {
           </p>
         </KPIWidget>
 
+        {/* Filter bar */}
+        {!dataLoading && contas.length > 0 && despesas.length > 0 && (
+          <div className="flex items-center justify-between mb-3.5 px-1 animate-fade-in-fast">
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)]">
+              Registros do ciclo
+            </span>
+            <select
+              value={filtroAccountId}
+              onChange={e => setFiltroAccountId(e.target.value)}
+              className="py-1.5 px-2.5 rounded-xl text-xs font-semibold glass-input bg-slate-900 border-slate-800 text-[var(--color-text-secondary)] cursor-pointer outline-none hover:border-slate-700 transition-colors"
+            >
+              <option value="all">Todas as contas</option>
+              {contas.map(acc => (
+                <option key={acc.id} value={acc.id} className="bg-slate-900">{acc.nome}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* List */}
         {dataLoading ? (
           <Card className="p-5"><SkeletonTable rows={5} /></Card>
-        ) : despesas.length === 0 ? (
+        ) : filteredDespesas.length === 0 ? (
           <Card className="p-2">
             <EmptyState
               icon="💸"
               title="Nenhuma despesa registrada"
-              description="Registre sua primeira saída deste ciclo de faturamento."
+              description={filtroAccountId === 'all'
+                ? "Registre sua primeira saída deste ciclo de faturamento."
+                : "Nenhuma despesa registrada nesta conta neste ciclo."
+              }
               actionLabel="Nova Despesa"
               onAction={openNew}
             />
           </Card>
         ) : (
           <Card className="p-1 divide-y divide-slate-800/40">
-            {despesas.map((desp) => {
-              const catName  = desp.financeCategories?.nome || 'Outros'
-              const catColor = desp.financeCategories?.cor  || '#f43f5e'
+            {filteredDespesas.map((desp) => {
+              const catName  = desp.financeCategories?.nome || 'Transferência'
+              const catColor = desp.financeCategories?.cor  || '#818cf8'
               const accName  = desp.financeAccounts?.nome   || 'Carteira'
               return (
                 <ActionRow
                   key={desp.id}
-                  onEdit={() => openEdit(desp)}
+                  onEdit={desp.origem !== 'transferencia' ? () => openEdit(desp) : undefined}
                   onDelete={() => handleDelete(desp.id)}
                 >
-                  <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center justify-between p-4 select-none">
                     <div className="flex items-center gap-3 min-w-0">
                       <div
                         className="p-2 rounded-xl flex-shrink-0"

@@ -1,5 +1,7 @@
 import { movementRepository, Movement } from '@/repositories/movement.repository'
 import { ServiceResult } from './conta.service'
+import { logger } from '@/lib/logger'
+import { eventBus } from '@/lib/event-bus'
 
 export const movementService = {
   async getMovements(
@@ -12,7 +14,7 @@ export const movementService = {
       const data = await movementRepository.getAll(userId, tipo, range, limit)
       return { success: true, data }
     } catch (err: any) {
-      console.error('Error in getMovements service:', err)
+      logger.error('Error in getMovements service:', err)
       return { success: false, error: err.message || 'Erro ao carregar movimentações.' }
     }
   },
@@ -35,9 +37,20 @@ export const movementService = {
       }
 
       const newMovement = await movementRepository.insert(movement)
+      
+      // Emit event to EventBus with eventId and version
+      eventBus.publish('MOVEMENT_CREATED', {
+        eventId: crypto.randomUUID(),
+        version: 1,
+        userId: newMovement.userId,
+        id: newMovement.id,
+        tipo: newMovement.tipo,
+        valor: newMovement.valor
+      })
+
       return { success: true, data: newMovement }
     } catch (err: any) {
-      console.error('Error in createMovement service:', err)
+      logger.error('Error in createMovement service:', err)
       return { success: false, error: err.message || 'Erro ao criar movimentação.' }
     }
   },
@@ -55,7 +68,7 @@ export const movementService = {
       const updated = await movementRepository.update(id, userId, movement)
       return { success: true, data: updated }
     } catch (err: any) {
-      console.error('Error in updateMovement service:', err)
+      logger.error('Error in updateMovement service:', err)
       return { success: false, error: err.message || 'Erro ao atualizar movimentação.' }
     }
   },
@@ -63,9 +76,18 @@ export const movementService = {
   async deleteMovement(id: string, userId: string): Promise<ServiceResult<void>> {
     try {
       await movementRepository.softDelete(id, userId)
+      
+      // Emit event to EventBus with eventId and version
+      eventBus.publish('MOVEMENT_DELETED', {
+        eventId: crypto.randomUUID(),
+        version: 1,
+        userId,
+        id
+      })
+
       return { success: true }
     } catch (err: any) {
-      console.error('Error in deleteMovement service:', err)
+      logger.error('Error in deleteMovement service:', err)
       return { success: false, error: err.message || 'Erro ao excluir movimentação.' }
     }
   }

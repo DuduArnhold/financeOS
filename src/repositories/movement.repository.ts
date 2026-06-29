@@ -179,5 +179,16 @@ export const movementRepository = {
       .eq('user_id', userId)
 
     if (error) throw error
+  },
+
+  async deleteByTransfer(transferId: string, userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('finance_movements')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('origem', 'transferencia')
+      .eq('origem_uuid', transferId)
+      .eq('user_id', userId)
+
+    if (error) throw error
   }
 }
