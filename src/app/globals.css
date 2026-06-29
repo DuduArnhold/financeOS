@@ -1,88 +1,173 @@
 @import "tailwindcss";
 
+/* ============================================================
+   FINANCEOS DESIGN TOKENS
+   Constituição visual — nunca usar valores fora desses tokens.
+   ============================================================ */
+
 :root {
-  --background: #090d16;
-  --foreground: #f8fafc;
-  --card-bg: rgba(15, 23, 42, 0.65);
-  --border-color: rgba(51, 65, 85, 0.45);
+  /* Surfaces */
+  --color-bg:           #090d16;
+  --color-surface:      rgba(15, 23, 42, 0.65);
+  --color-surface-alt:  rgba(15, 23, 42, 0.40);
+  --color-border:       rgba(51, 65, 85, 0.45);
+
+  /* Text */
+  --color-text-primary:   #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted:     #475569;
+
+  /* Accent */
+  --color-accent:   #6366f1;
+  --color-success:  #10b981;
+  --color-danger:   #f43f5e;
+  --color-warning:  #f59e0b;
+
+  /* Glass */
+  --glass-blur:    18px;
+  --glass-opacity: 0.65;
+
+  /* Radii */
+  --radius-sm:  12px;
+  --radius-md:  16px;
+  --radius-lg:  24px;
+
+  /* Animation durations */
+  --duration-hover:   120ms;
+  --duration-exit:    150ms;
+  --duration-enter:   180ms;
+  --duration-sheet:   240ms;
+  --ease-enter: cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 
+/* Light mode overrides */
+.light {
+  --color-bg:           #f8fafc;
+  --color-surface:      rgba(255, 255, 255, 0.70);
+  --color-surface-alt:  rgba(241, 245, 249, 0.80);
+  --color-border:       rgba(226, 232, 240, 0.80);
+
+  --color-text-primary:   #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-muted:     #94a3b8;
+
+  --color-accent:  #4f46e5;
+  --color-success: #059669;
+  --color-danger:  #db2777;
+  --color-warning: #d97706;
+}
+
+/* ============================================================
+   TAILWIND v4 THEME MAPPING
+   ============================================================ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card-glass: var(--card-bg);
-  --color-border-glass: var(--border-color);
+  --color-background:   var(--color-bg);
+  --color-foreground:   var(--color-text-primary);
+  --color-card-glass:   var(--color-surface);
+  --color-border-glass: var(--color-border);
+  --color-accent:       var(--color-accent);
+  --color-success:      var(--color-success);
+  --color-danger:       var(--color-danger);
+  --color-warning:      var(--color-warning);
 }
 
+/* ============================================================
+   BASE
+   ============================================================ */
 body {
-  background-color: var(--background);
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(at 0% 0%,   rgba(99, 102, 241, 0.08) 0px, transparent 50%),
     radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.05) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(244, 63, 94, 0.06) 0px, transparent 50%);
-  color: var(--foreground);
+    radial-gradient(at 50% 100%,rgba(244, 63, 94, 0.06)  0px, transparent 50%);
+  color: var(--color-text-primary);
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  transition: background-color var(--duration-enter) var(--ease-enter),
+              color var(--duration-enter) var(--ease-enter);
 }
 
-/* Glassmorphism card utility */
+.light body {
+  background-image: none;
+  background-color: var(--color-bg);
+}
+
+/* ============================================================
+   GLASS UTILITIES
+   ============================================================ */
 .glass-card {
-  background: var(--card-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border-color);
+  background: var(--color-surface);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--color-border);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
-/* Glassmorphism input utility */
 .glass-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid var(--border-color);
-  color: var(--foreground);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
   outline: none;
-  transition: all 0.2s ease-in-out;
+  transition: border-color var(--duration-hover) ease-out,
+              box-shadow var(--duration-hover) ease-out;
 }
 
 .glass-input:focus {
   border-color: rgba(99, 102, 241, 0.8);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(9, 13, 22, 0.5); }
+::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.5); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.6); }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ============================================================
+   ANIMATION UTILITIES
+   ============================================================ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-::-webkit-scrollbar-track {
-  background: rgba(9, 13, 22, 0.5);
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.5);
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.6);
-}
-
-/* Hide scrollbar for elements but keep functionality */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-/* Animation utilities */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
 
+.animate-fade-in     { animation: fadeInUp var(--duration-enter) var(--ease-enter) forwards; }
+.animate-fade-in-fast{ animation: fadeIn  var(--duration-hover)  ease-out forwards; }
+
+/* Skeleton shimmer */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    rgba(51,65,85,0.3)   50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Reduced motion — todos os componentes devem checar isso */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

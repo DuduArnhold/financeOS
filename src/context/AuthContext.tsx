@@ -97,7 +97,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       }
     } catch (e) {
-      console.error(e)
+      console.error('Exception fetching profile, using fallback:', e)
+      setProfile({
+        id: uid,
+        nome: 'Usuário',
+        email: '',
+        moeda: 'R$',
+        fechamento_dia: 30,
+        tema: 'dark',
+        ativo: true,
+      })
     }
   }
 

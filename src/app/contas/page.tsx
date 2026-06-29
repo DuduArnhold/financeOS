@@ -1,78 +1,87 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
+import { useAuth }   from '@/context/AuthContext'
+import { useToast }  from '@/context/ToastContext'
+import { useDialog } from '@/context/DialogContext'
 import { formatCurrency, formatDateLabel } from '@/lib/utils'
-import { 
-  CalendarDays, 
-  Plus, 
-  Trash2, 
-  X, 
-  Check, 
-  Edit2, 
-  Calendar,
-  DollarSign,
-  AlertCircle,
-  CheckCircle2,
-  RefreshCw,
-  CreditCard,
-  Briefcase,
-  Tag,
-  MessageSquare
+import {
+  CalendarDays, Plus, Calendar, DollarSign, AlertCircle, CheckCircle2,
+  RefreshCw, CreditCard, Briefcase, Tag, MessageSquare, Trash2
 } from 'lucide-react'
-import Loader from '@/components/Loader'
-import { toast } from 'sonner'
-import { contaService } from '@/services/conta.service'
-import { accountService } from '@/services/account.service'
-import { categoryService } from '@/services/category.service'
-import { Conta } from '@/repositories/conta.repository'
-import { Account } from '@/repositories/account.repository'
-import { Category } from '@/repositories/category.repository'
 
-const FORMAS_PAGAMENTO = ['Pix', 'Boleto', 'Cartão de Crédito', 'Cartão de Débito', 'Dinheiro', 'Outro']
+import { AppShell }       from '@/components/layout/AppShell'
+import { PageHeader, PageTitle } from '@/components/layout/PageHeader'
+import { Button }         from '@/components/ui/Button'
+import { Card }           from '@/components/ui/Card'
+import { Input }          from '@/components/ui/Input'
+import { Select }         from '@/components/ui/Select'
+import { Badge }          from '@/components/ui/Badge'
+import { ActionRow }      from '@/components/finance/ActionRow'
+import { EmptyState }     from '@/components/feedback/EmptyState'
+import { BottomSheet }    from '@/components/feedback/BottomSheet'
+import { SkeletonTable }  from '@/components/feedback/Skeletons'
+import { PullRefresh }    from '@/components/mobile/PullRefresh'
+import { KPIWidget }      from '@/components/finance/Widgets'
+
+import { contaService }   from '@/services/conta.service'
+import { accountService }  from '@/services/account.service'
+import { categoryService }  from '@/services/category.service'
+import { Conta }           from '@/repositories/conta.repository'
+import { Account }         from '@/repositories/account.repository'
+import { Category }        from '@/repositories/category.repository'
+
+const TODAY = new Date().toISOString().split('T')[0]
+const FORMAS_PAGAMENTO = [
+  { value: 'Pix', label: 'Pix' },
+  { value: 'Boleto', label: 'Boleto' },
+  { value: 'Cartão de Crédito', label: 'Cartão de Crédito' },
+  { value: 'Cartão de Débito', label: 'Cartão de Débito' },
+  { value: 'Dinheiro', label: 'Dinheiro' },
+  { value: 'Outro', label: 'Outro' }
+]
 
 export default function ContasPage() {
   const { user, profile, loading } = useAuth()
+  const toast  = useToast()
+  const dialog = useDialog()
   const router = useRouter()
 
-  const [contas, setContas] = useState<Conta[]>([])
-  const [categorias, setCategorias] = useState<Category[]>([])
+  const [contas,            setContas]            = useState<Conta[]>([])
+  const [categorias,        setCategorias]        = useState<Category[]>([])
   const [contasFinanceiras, setContasFinanceiras] = useState<Account[]>([])
+  const [dataLoading,       setDataLoading]       = useState(true)
   
-  const [dataLoading, setDataLoading] = useState(true)
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  
-  // Form State
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [nome, setNome] = useState('')
-  const [valor, setValor] = useState('')
-  const [vencimento, setVencimento] = useState(new Date().toISOString().split('T')[0])
-  const [recorrente, setRecorrente] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  // Create / Edit Form State
+  const [sheetOpen,   setSheetOpen]   = useState(false)
+  const [editingId,   setEditingId]   = useState<string | null>(null)
+  const [nome,        setNome]        = useState('')
+  const [valor,       setValor]       = useState('')
+  const [vencimento,  setVencimento]  = useState(TODAY)
+  const [recorrente,  setRecorrente]  = useState(false)
+  const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
 
-  // Payment Modal State
-  const [isPayModalOpen, setIsPayModalOpen] = useState(false)
-  const [payingConta, setPayingConta] = useState<Conta | null>(null)
-  const [payAccountId, setPayAccountId] = useState('')
-  const [payCategoryId, setPayCategoryId] = useState('')
-  const [payMethod, setPayMethod] = useState(FORMAS_PAGAMENTO[0])
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0])
-  const [payObservation, setPayObservation] = useState('')
-  const [paying, setPaying] = useState(false)
+  // Payment BottomSheet State
+  const [paySheetOpen,    setPaySheetOpen]    = useState(false)
+  const [payingConta,     setPayingConta]     = useState<Conta | null>(null)
+  const [payAccountId,    setPayAccountId]    = useState('')
+  const [payCategoryId,   setPayCategoryId]   = useState('')
+  const [payMethod,       setPayMethod]       = useState(FORMAS_PAGAMENTO[0].value)
+  const [payDate,         setPayDate]         = useState(TODAY)
+  const [payObservation,  setPayObservation]  = useState('')
+  const [paySubmitState,  setPaySubmitState]  = useState<'idle'|'loading'|'success'|'error'>('idle')
 
-  // Unpay Modal State
-  const [isUnpayModalOpen, setIsUnpayModalOpen] = useState(false)
-  const [unpayingConta, setUnpayingConta] = useState<Conta | null>(null)
-  const [unpaying, setUnpaying] = useState(false)
+  // Unpay BottomSheet State
+  const [unpaySheetOpen,  setUnpaySheetOpen]  = useState(false)
+  const [unpayingConta,   setUnpayingConta]   = useState<Conta | null>(null)
+  const [unpaySubmitState,setUnpaySubmitState]= useState<'idle'|'loading'|'success'|'error'>('idle')
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login')
-    }
+    if (!loading && !user) router.push('/login')
   }, [user, loading, router])
 
-  const loadContas = async () => {
+  const loadContas = useCallback(async () => {
     if (!user || !profile) return
     setDataLoading(true)
     try {
@@ -82,16 +91,15 @@ export default function ContasPage() {
       } else if (result.error) {
         toast.error(result.error)
       }
-    } catch (err) {
-      console.error('Error fetching contas:', err)
+    } catch {
       toast.error('Erro ao carregar contas.')
     } finally {
       setDataLoading(false)
     }
-  }
+  }, [user, profile, toast])
 
-  const loadInitialData = async () => {
-    if (!user || !profile) return
+  const loadInitialData = useCallback(async () => {
+    if (!user) return
     try {
       const [contasRes, catRes] = await Promise.all([
         accountService.getActiveAccounts(user.id),
@@ -104,117 +112,82 @@ export default function ContasPage() {
         setCategorias(catRes.data)
       }
     } catch (err) {
-      console.error('Error loading static data for payment modal:', err)
+      console.error('Error loading account and categories data for payment modal:', err)
     }
-  }
+  }, [user])
 
   useEffect(() => {
     loadContas()
     loadInitialData()
-  }, [user, profile])
+  }, [loadContas, loadInitialData])
 
-  const handleOpenNewForm = () => {
-    setEditingId(null)
-    setNome('')
-    setValor('')
-    setVencimento(new Date().toISOString().split('T')[0])
-    setRecorrente(false)
-    setIsFormOpen(true)
-  }
+  const openNew = useCallback(() => {
+    setEditingId(null); setNome(''); setValor(''); setVencimento(TODAY); setRecorrente(false)
+    setSheetOpen(true)
+  }, [])
 
-  const handleOpenEditForm = (conta: Conta) => {
+  const openEdit = useCallback((conta: Conta) => {
     setEditingId(conta.id)
     setNome(conta.nome)
     setValor(conta.valor.toString())
     setVencimento(conta.vencimento)
     setRecorrente(conta.recorrente)
-    setIsFormOpen(true)
-  }
-
-  const handleCloseForm = () => {
-    setIsFormOpen(false)
-    setEditingId(null)
-  }
+    setSheetOpen(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!nome.trim()) {
-      toast.error('Informe o nome da conta.')
-      return
-    }
-    if (!valor || Number(valor) <= 0) {
-      toast.error('Informe um valor maior que zero.')
-      return
-    }
-    if (!vencimento) {
-      toast.error('Informe a data de vencimento.')
-      return
-    }
+    if (!nome.trim()) { toast.error('Informe o nome da conta.'); return }
+    if (!valor || Number(valor) <= 0) { toast.error('Informe um valor maior que zero.'); return }
+    if (!vencimento) { toast.error('Informe a data de vencimento.'); return }
 
-    setSubmitting(true)
+    setSubmitState('loading')
     try {
-      if (editingId) {
-        // Edit Mode
-        const result = await contaService.updateConta(
-          editingId,
-          user!.id,
-          nome.trim(),
-          Number(valor),
-          vencimento,
-          recorrente
-        )
-        if (result.success) {
-          toast.success('Conta atualizada com sucesso!')
-          handleCloseForm()
-          await loadContas()
-        } else {
-          toast.error(result.error || 'Erro ao atualizar conta.')
-        }
+      const result = editingId
+        ? await contaService.updateConta(editingId, user!.id, nome.trim(), Number(valor), vencimento, recorrente)
+        : await contaService.createConta(user!.id, nome.trim(), Number(valor), vencimento, recorrente)
+
+      if (result.success) {
+        setSubmitState('success')
+        toast.success(editingId ? 'Conta atualizada!' : 'Conta registrada!')
+        setTimeout(() => { setSheetOpen(false); setSubmitState('idle'); loadContas() }, 800)
       } else {
-        // Create Mode
-        const result = await contaService.createConta(
-          user!.id,
-          nome.trim(),
-          Number(valor),
-          vencimento,
-          recorrente
-        )
-        if (result.success) {
-          toast.success('Conta registrada!')
-          handleCloseForm()
-          await loadContas()
-        } else {
-          toast.error(result.error || 'Erro ao registrar conta.')
-        }
+        setSubmitState('error')
+        toast.error(result.error || 'Erro ao registrar conta.')
+        setTimeout(() => setSubmitState('idle'), 2000)
       }
-    } catch (err: any) {
-      console.error('Error submitting conta:', err)
-      toast.error('Erro ao registrar conta.')
-    } finally {
-      setSubmitting(false)
+    } catch {
+      setSubmitState('error')
+      toast.error('Erro ao salvar conta.')
+      setTimeout(() => setSubmitState('idle'), 2000)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente excluir esta conta?')) return
+  const handleDelete = useCallback(async (id: string) => {
+    const ok = await dialog.confirm({
+      title: 'Excluir conta?',
+      description: 'Essa ação não pode ser desfeita e removerá os dados de vencimento.',
+      confirmText: 'Excluir',
+      variant: 'danger',
+    })
+    if (!ok) return
 
     try {
       const result = await contaService.deleteConta(id, user!.id)
       if (result.success) {
         toast.success('Conta excluída.')
-        await loadContas()
+        loadContas()
       } else {
         toast.error(result.error || 'Erro ao excluir conta.')
       }
-    } catch (err: any) {
-      console.error('Error deleting conta:', err)
+    } catch {
       toast.error('Erro ao excluir conta.')
     }
-  }
+  }, [dialog, toast, user, loadContas])
 
   const handleConfirmPayment = async () => {
     if (!payingConta || !user) return
-    setPaying(true)
+    setPaySubmitState('loading')
     try {
       const result = await contaService.payConta(
         payingConta.id,
@@ -226,59 +199,55 @@ export default function ContasPage() {
         payObservation.trim()
       )
       if (result.success) {
-        toast.success('Pagamento registrado com sucesso!')
-        setIsPayModalOpen(false)
-        setPayingConta(null)
-        await loadContas()
+        setPaySubmitState('success')
+        toast.success('Pagamento registrado!')
+        setTimeout(() => { setPaySheetOpen(false); setPayingConta(null); setPaySubmitState('idle'); loadContas() }, 800)
       } else {
+        setPaySubmitState('error')
         toast.error(result.error || 'Erro ao registrar pagamento.')
+        setTimeout(() => setPaySubmitState('idle'), 2000)
       }
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setPaySubmitState('error')
       toast.error('Erro ao processar pagamento.')
-    } finally {
-      setPaying(false)
+      setTimeout(() => setPaySubmitState('idle'), 2000)
     }
   }
 
   const handleConfirmUnpay = async (deleteMovement: boolean) => {
     if (!unpayingConta || !user) return
-    setUnpaying(true)
+    setUnpaySubmitState('loading')
     try {
-      const result = await contaService.unpayConta(
-        unpayingConta.id,
-        user.id,
-        deleteMovement
-      )
+      const result = await contaService.unpayConta(unpayingConta.id, user.id, deleteMovement)
       if (result.success) {
+        setUnpaySubmitState('success')
         toast.success('Pagamento desfeito!')
-        setIsUnpayModalOpen(false)
-        setUnpayingConta(null)
-        await loadContas()
+        setTimeout(() => { setUnpaySheetOpen(false); setUnpayingConta(null); setUnpaySubmitState('idle'); loadContas() }, 800)
       } else {
+        setUnpaySubmitState('error')
         toast.error(result.error || 'Erro ao desfazer pagamento.')
+        setTimeout(() => setUnpaySubmitState('idle'), 2000)
       }
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setUnpaySubmitState('error')
       toast.error('Erro ao desfazer pagamento.')
-    } finally {
-      setUnpaying(false)
+      setTimeout(() => setUnpaySubmitState('idle'), 2000)
     }
   }
 
-  const toggleStatus = (conta: Conta) => {
+  const toggleStatus = useCallback((conta: Conta) => {
     if (conta.paga) {
       setUnpayingConta(conta)
-      setIsUnpayModalOpen(true)
+      setUnpaySheetOpen(true)
     } else {
       setPayingConta(conta)
       
-      // Default configurations
       if (contasFinanceiras.length > 0) {
         setPayAccountId(contasFinanceiras[0].id)
+      } else {
+        setPayAccountId('')
       }
       
-      // Memory Link (Categoria preferida)
       if (conta.categoriaPreferidaId && categorias.some(c => c.id === conta.categoriaPreferidaId)) {
         setPayCategoryId(conta.categoriaPreferidaId)
       } else if (categorias.length > 0) {
@@ -287,505 +256,337 @@ export default function ContasPage() {
         setPayCategoryId('')
       }
 
-      setPayMethod(FORMAS_PAGAMENTO[0])
-      setPayDate(new Date().toISOString().split('T')[0])
+      setPayMethod(FORMAS_PAGAMENTO[0].value)
+      setPayDate(TODAY)
       setPayObservation(`Pagamento da conta: ${conta.nome}`)
-      setIsPayModalOpen(true)
+      setPaySheetOpen(true)
     }
-  }
+  }, [contasFinanceiras, categorias])
 
-  if (loading || dataLoading || !profile) {
-    return <Loader />
-  }
+  const currencySymbol = profile?.moeda || 'R$'
+  const contasPendentes = useMemo(() => contas.filter(c => !c.paga), [contas])
+  const contasPagas     = useMemo(() => contas.filter(c => c.paga), [contas])
+  const totalPendente   = useMemo(() => contasPendentes.reduce((sum, c) => sum + c.valor, 0), [contasPendentes])
 
-  const currencySymbol = profile.moeda || 'R$'
-
-  const contasPendentes = contas.filter(c => !c.paga)
-  const contasPagas = contas.filter(c => c.paga)
-  const totalPendente = contasPendentes.reduce((sum, c) => sum + c.valor, 0)
+  const accOptions = useMemo(() => contasFinanceiras.map(a => ({ value: a.id, label: a.nome })), [contasFinanceiras])
+  const catOptions = useMemo(() => categorias.map(c => ({ value: c.id, label: c.nome })), [categorias])
 
   return (
-    <main className="container max-w-lg mx-auto px-4 pt-6 pb-20 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Compromissos</span>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Contas</h1>
+    <PullRefresh onRefresh={loadContas}>
+      <AppShell>
+        <PageHeader
+          left={<PageTitle eyebrow="Compromissos" title="Contas" />}
+          right={
+            <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+              Nova Conta
+            </Button>
+          }
+        />
+
+        {/* Totalizer */}
+        <KPIWidget
+          title="Total em contas pendentes"
+          value={totalPendente}
+          prefix={`${currencySymbol} `}
+          icon={<CalendarDays className="w-5 h-5" />}
+          accentClass="text-amber-400"
+          glowClass="bg-amber-500/8"
+          className="mb-4"
+        >
+          <div className="flex justify-between items-center mt-1.5">
+            <span className="text-[11px] text-[var(--color-text-muted)]">Ciclo corrente</span>
+            <Badge variant="warning">
+              {contasPendentes.length} {contasPendentes.length === 1 ? 'pendente' : 'pendentes'}
+            </Badge>
+          </div>
+        </KPIWidget>
+
+        {/* List Grid */}
+        <div className="space-y-6">
+          {/* Skeletons */}
+          {dataLoading ? (
+            <Card className="p-5"><SkeletonTable rows={4} /></Card>
+          ) : (
+            <>
+              {/* Section: Pendentes */}
+              <div className="space-y-3">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] px-1 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  Pendentes ({contasPendentes.length})
+                </h2>
+                {contasPendentes.length === 0 ? (
+                  <Card className="p-6 text-center text-xs text-[var(--color-text-muted)] font-medium">
+                    Tudo pago! Nenhuma conta pendente. 🎉
+                  </Card>
+                ) : (
+                  <Card className="p-1 divide-y divide-slate-800/40">
+                    {contasPendentes.map((conta) => (
+                      <ActionRow
+                        key={conta.id}
+                        onEdit={() => openEdit(conta)}
+                        onDelete={() => handleDelete(conta.id)}
+                      >
+                        <div className="flex items-center justify-between p-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <button
+                              onClick={() => toggleStatus(conta)}
+                              className="p-1.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-slate-500 hover:text-emerald-400 hover:border-emerald-400/30 hover:bg-emerald-400/5 transition-all cursor-pointer"
+                              title="Marcar como paga"
+                            >
+                              <AlertCircle className="w-4 h-4 text-amber-500" />
+                            </button>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="text-sm font-bold text-[var(--color-text-primary)] line-clamp-1">{conta.nome}</h3>
+                                {conta.recorrente && (
+                                  <Badge variant="info" className="text-[9px] px-1 py-0.5">
+                                    <RefreshCw className="w-2.5 h-2.5 mr-0.5" />
+                                    Mensal
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[var(--color-text-secondary)]">
+                                Vence em {formatDateLabel(conta.vencimento)}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-sm font-bold text-amber-400 flex-shrink-0 ml-3">
+                            {formatCurrency(conta.valor, currencySymbol)}
+                          </span>
+                        </div>
+                      </ActionRow>
+                    ))}
+                  </Card>
+                )}
+              </div>
+
+              {/* Section: Pagas */}
+              <div className="space-y-3">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] px-1 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Pagas ({contasPagas.length})
+                </h2>
+                {contasPagas.length === 0 ? (
+                  <Card className="p-6 text-center text-xs text-[var(--color-text-muted)] font-medium">
+                    Nenhuma conta paga ainda.
+                  </Card>
+                ) : (
+                  <Card className="p-1 divide-y divide-slate-800/40 opacity-60 hover:opacity-100 transition-opacity duration-150">
+                    {contasPagas.map((conta) => (
+                      <ActionRow
+                        key={conta.id}
+                        onDelete={() => handleDelete(conta.id)}
+                      >
+                        <div className="flex items-center justify-between p-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <button
+                              onClick={() => toggleStatus(conta)}
+                              className="p-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:text-amber-500 hover:border-amber-500/30 hover:bg-amber-500/5 transition-all cursor-pointer"
+                              title="Marcar como pendente"
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            </button>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="text-sm font-bold text-[var(--color-text-secondary)] line-through line-clamp-1">{conta.nome}</h3>
+                                {conta.recorrente && (
+                                  <Badge variant="default" className="text-[9px] px-1 py-0.5">
+                                    <RefreshCw className="w-2.5 h-2.5 mr-0.5" />
+                                    Mensal
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[var(--color-text-muted)]">
+                                Paga · Vencimento: {formatDateLabel(conta.vencimento)}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-sm font-bold text-slate-400 line-through flex-shrink-0 ml-3">
+                            {formatCurrency(conta.valor, currencySymbol)}
+                          </span>
+                        </div>
+                      </ActionRow>
+                    ))}
+                  </Card>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        {!isFormOpen && (
-          <button
-            onClick={handleOpenNewForm}
-            className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all duration-200 shadow-lg shadow-amber-600/10 active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Nova Conta
-          </button>
-        )}
-      </div>
 
-      {/* Header Totalizer */}
-      <div className="glass-card rounded-2xl p-5 border-slate-800/80 mb-6 flex justify-between items-center relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl pointer-events-none" />
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
-            <CalendarDays className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 font-medium">Total em contas pendentes</p>
-            <p className="text-xl font-bold text-amber-400 mt-0.5">
-              {formatCurrency(totalPendente, currencySymbol)}
-            </p>
-          </div>
-        </div>
-        <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium">
-          {contasPendentes.length} {contasPendentes.length === 1 ? 'pendente' : 'pendentes'}
-        </span>
-      </div>
-
-      {/* Form Section */}
-      {isFormOpen && (
-        <div className="glass-card rounded-2xl p-6 border-slate-800/80 mb-6 shadow-xl animate-fade-in">
-          <div className="flex justify-between items-center mb-5 pb-3 border-b border-slate-800/40">
-            <h2 className="text-sm font-semibold text-slate-200">
-              {editingId ? 'Editar Conta' : 'Adicionar Nova Conta'}
-            </h2>
-            <button 
-              onClick={handleCloseForm}
-              className="text-slate-400 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-slate-800/40"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
+        {/* Form BottomSheet */}
+        <BottomSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          title={editingId ? 'Editar Conta' : 'Nova Conta'}
+        >
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Nome da conta</label>
-              <input
-                type="text"
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                placeholder="Ex: Internet, Aluguel, Luz"
-                className="w-full px-4 py-2 rounded-xl text-sm glass-input"
-                disabled={submitting}
-                required
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Valor</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <DollarSign className="w-4 h-4 text-amber-400" />
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={valor}
-                  onChange={(e) => setValor(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input text-amber-400 font-semibold"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Data de Vencimento</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Calendar className="w-4 h-4" />
-                </span>
-                <input
-                  type="date"
-                  value={vencimento}
-                  onChange={(e) => setVencimento(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input cursor-pointer"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 py-2">
+            <Input
+              label="Nome da conta"
+              type="text"
+              value={nome}
+              onChange={e => setNome(e.target.value)}
+              placeholder="Ex: Internet, Aluguel, Luz"
+              required
+            />
+            <Input
+              label="Valor"
+              type="number" step="0.01" min="0.01"
+              value={valor}
+              onChange={e => setValor(e.target.value)}
+              placeholder="0,00"
+              leftIcon={<DollarSign className="w-4 h-4 text-amber-400" />}
+              required
+            />
+            <Input
+              label="Data de Vencimento"
+              type="date"
+              value={vencimento}
+              onChange={e => setVencimento(e.target.value)}
+              leftIcon={<Calendar className="w-4 h-4" />}
+              required
+            />
+            <div className="flex items-center gap-2.5 py-1">
               <input
                 type="checkbox"
                 id="recorrente"
                 checked={recorrente}
-                onChange={(e) => setRecorrente(e.target.checked)}
+                onChange={e => setRecorrente(e.target.checked)}
                 className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/30 cursor-pointer"
-                disabled={submitting}
+                disabled={submitState === 'loading'}
               />
-              <label htmlFor="recorrente" className="text-slate-300 text-xs font-medium flex items-center gap-1.5 select-none cursor-pointer">
-                <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+              <label htmlFor="recorrente" className="text-xs font-semibold text-[var(--color-text-secondary)] flex items-center gap-1.5 select-none cursor-pointer">
+                <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
                 Esta conta é recorrente? (Repete todo mês)
               </label>
             </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleCloseForm}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                disabled={submitting}
-              >
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setSheetOpen(false)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-600/10 active:scale-95 cursor-pointer"
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    {editingId ? 'Salvar' : 'Confirmar'}
-                  </>
-                )}
-              </button>
+              </Button>
+              <Button type="submit" variant="primary" state={submitState} className="flex-1">
+                {editingId ? 'Salvar' : 'Registrar'}
+              </Button>
             </div>
           </form>
-        </div>
-      )}
+        </BottomSheet>
 
-      {/* Contas List */}
-      <div className="space-y-6">
-        {/* Section: Pendentes */}
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 px-1 flex items-center gap-2 animate-fade-in">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            Pendentes ({contasPendentes.length})
-          </h2>
-          {contasPendentes.length === 0 ? (
-            <div className="glass-card rounded-xl p-6 border-slate-800/80 text-center">
-              <p className="text-xs text-slate-500 font-medium">Tudo pago! Nenhuma conta pendente.</p>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {contasPendentes.map((conta) => (
-                <div 
-                  key={conta.id} 
-                  className="glass-card rounded-xl p-4 border-slate-800/80 flex items-center justify-between shadow-md relative group hover:border-slate-700 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => toggleStatus(conta)}
-                      className="p-1.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-slate-500 hover:text-emerald-400 hover:border-emerald-400/30 hover:bg-emerald-400/5 transition-all cursor-pointer"
-                      title="Marcar como paga"
-                    >
-                      <AlertCircle className="w-4 h-4 text-amber-500" />
-                    </button>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-bold text-slate-200 line-clamp-1">{conta.nome}</h3>
-                        {conta.recorrente && (
-                          <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded font-medium flex items-center gap-0.5">
-                            <RefreshCw className="w-2.5 h-2.5" />
-                            Mensal
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-slate-400">
-                        Vence em {formatDateLabel(conta.vencimento)}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm font-bold text-amber-400">
-                      {formatCurrency(conta.valor, currencySymbol)}
-                    </div>
-                    <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => handleOpenEditForm(conta)}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
-                        title="Editar"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(conta.id)}
-                        className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Section: Pagas */}
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 px-1 flex items-center gap-2 animate-fade-in">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Pagas ({contasPagas.length})
-          </h2>
-          {contasPagas.length === 0 ? (
-            <div className="glass-card rounded-xl p-6 border-slate-800/80 text-center">
-              <p className="text-xs text-slate-500 font-medium">Nenhuma conta paga ainda.</p>
-            </div>
-          ) : (
-            <div className="space-y-2.5 opacity-60 hover:opacity-90 transition-opacity">
-              {contasPagas.map((conta) => (
-                <div 
-                  key={conta.id} 
-                  className="glass-card rounded-xl p-4 border-slate-800/80 flex items-center justify-between shadow-md relative group hover:border-slate-700 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => toggleStatus(conta)}
-                      className="p-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:text-amber-500 hover:border-amber-500/30 hover:bg-amber-500/5 transition-all cursor-pointer"
-                      title="Marcar como pendente"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    </button>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-bold text-slate-300 line-clamp-1 line-through">{conta.nome}</h3>
-                        {conta.recorrente && (
-                          <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded font-medium flex items-center gap-0.5">
-                            <RefreshCw className="w-2.5 h-2.5" />
-                            Mensal
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        Paga • Vencimento: {formatDateLabel(conta.vencimento)}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm font-bold text-slate-400 line-through">
-                      {formatCurrency(conta.valor, currencySymbol)}
-                    </div>
-                    <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => handleDelete(conta.id)}
-                        className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Modal de Pagamento */}
-      {isPayModalOpen && payingConta && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-card rounded-2xl p-6 border-slate-800 max-w-sm w-full shadow-2xl animate-fade-in">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                Confirmar Pagamento
-              </h3>
-              <button 
-                onClick={() => { setIsPayModalOpen(false); setPayingConta(null); }}
-                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400 mb-5 leading-relaxed">
-              Você está marcando a conta <strong className="text-slate-200">{payingConta.nome}</strong> no valor de <strong className="text-emerald-400">{formatCurrency(payingConta.valor, currencySymbol)}</strong> como paga.
-            </p>
-
+        {/* Payment BottomSheet */}
+        <BottomSheet
+          open={paySheetOpen}
+          onClose={() => { setPaySheetOpen(false); setPayingConta(null); }}
+          title="Confirmar Pagamento"
+        >
+          {payingConta && (
             <div className="space-y-4">
-              {/* Conta Financeira */}
-              <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
-                  <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
-                  Conta de Origem
-                </label>
-                <select
+              <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/10">
+                <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+                  Marcando <strong className="text-[var(--color-text-primary)]">{payingConta.nome}</strong> de <strong className="text-emerald-400">{formatCurrency(payingConta.valor, currencySymbol)}</strong> como paga.
+                </p>
+              </div>
+
+              <form onSubmit={e => { e.preventDefault(); handleConfirmPayment(); }} className="space-y-4">
+                <Select
+                  label="Conta de origem"
+                  options={accOptions}
                   value={payAccountId}
-                  onChange={(e) => setPayAccountId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
-                >
-                  {contasFinanceiras.length === 0 ? (
-                    <option value="">Nenhuma conta ativa disponível</option>
-                  ) : (
-                    contasFinanceiras.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.nome}</option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              {/* Categoria */}
-              <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5 text-rose-400" />
-                  Categoria da Despesa
-                </label>
-                <select
+                  onChange={e => setPayAccountId(e.target.value)}
+                  leftIcon={<CreditCard className="w-4 h-4 text-indigo-400" />}
+                  required
+                />
+                <Select
+                  label="Categoria de Despesa"
+                  options={catOptions}
                   value={payCategoryId}
-                  onChange={(e) => setPayCategoryId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
-                >
-                  {categorias.length === 0 ? (
-                    <option value="">Nenhuma categoria de despesa disponível</option>
-                  ) : (
-                    categorias.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.nome}</option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              {/* Forma de Pagamento */}
-              <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                  Forma de Pagamento
-                </label>
-                <select
+                  onChange={e => setPayCategoryId(e.target.value)}
+                  leftIcon={<Tag className="w-4 h-4 text-rose-400" />}
+                  required
+                />
+                <Select
+                  label="Forma de Pagamento"
+                  options={FORMAS_PAGAMENTO}
                   value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input cursor-pointer"
-                >
-                  {FORMAS_PAGAMENTO.map(method => (
-                    <option key={method} value={method}>{method}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Data de Pagamento */}
-              <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                  Data de Pagamento
-                </label>
-                <input
+                  onChange={e => setPayMethod(e.target.value)}
+                  leftIcon={<DollarSign className="w-4 h-4 text-emerald-400" />}
+                  required
+                />
+                <Input
+                  label="Data do Pagamento"
                   type="date"
                   value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs font-semibold glass-input"
+                  onChange={e => setPayDate(e.target.value)}
+                  leftIcon={<Calendar className="w-4 h-4 text-amber-400" />}
+                  required
                 />
-              </div>
-
-              {/* Observação / Descrição */}
-              <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5 flex items-center gap-1.5">
-                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                  Descrição da Transação
-                </label>
-                <input
+                <Input
+                  label="Descrição da Transação"
                   type="text"
                   value={payObservation}
-                  onChange={(e) => setPayObservation(e.target.value)}
+                  onChange={e => setPayObservation(e.target.value)}
                   placeholder="Ex: Pagamento da conta de Luz"
-                  className="w-full px-3 py-2 rounded-xl text-xs font-medium glass-input"
+                  leftIcon={<MessageSquare className="w-4 h-4 text-slate-500" />}
                 />
+
+                <div className="flex gap-3 pt-1">
+                  <Button type="button" variant="outline" onClick={() => { setPaySheetOpen(false); setPayingConta(null); }} className="flex-1">
+                    Cancelar
+                  </Button>
+                  <Button type="submit" variant="success-variant" state={paySubmitState} disabled={!payAccountId || !payCategoryId} className="flex-1">
+                    Pagar Conta
+                  </Button>
+                </div>
+              </form>
+            </div>
+          )}
+        </BottomSheet>
+
+        {/* Unpay BottomSheet */}
+        <BottomSheet
+          open={unpaySheetOpen}
+          onClose={() => { setUnpaySheetOpen(false); setUnpayingConta(null); }}
+          title="Desfazer Pagamento"
+        >
+          {unpayingConta && (
+            <div className="space-y-4">
+              <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+                Você quer reverter o pagamento da conta <strong className="text-[var(--color-text-primary)]">{unpayingConta.nome}</strong> no valor de <strong className="text-amber-400">{formatCurrency(unpayingConta.valor, currencySymbol)}</strong> para o status de <strong className="text-amber-400">Pendente</strong>?
+              </p>
+
+              <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800">
+                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+                  Isso gerará uma ação sobre o registro de despesa correspondente que foi criado no seu histórico financeiro.
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                <Button
+                  variant="danger"
+                  state={unpaySubmitState}
+                  onClick={() => handleConfirmUnpay(true)}
+                  className="w-full flex justify-center"
+                >
+                  <Trash2 className="w-4 h-4 mr-1.5" />
+                  Sim, excluir despesa
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleConfirmUnpay(false)}
+                  className="w-full flex justify-center border-slate-700 hover:bg-slate-800/80 text-[var(--color-text-primary)]"
+                >
+                  Não, manter despesa (desvincular)
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => { setUnpaySheetOpen(false); setUnpayingConta(null); }}
+                  className="w-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                >
+                  Cancelar
+                </Button>
               </div>
             </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                type="button"
-                onClick={() => { setIsPayModalOpen(false); setPayingConta(null); }}
-                className="flex-1 bg-slate-850 hover:bg-slate-800 text-slate-300 py-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                disabled={paying}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmPayment}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/10 active:scale-95 cursor-pointer"
-                disabled={paying || !payAccountId || !payCategoryId}
-              >
-                {paying ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    Pagar Conta
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmação de Desfazer Pagamento */}
-      {isUnpayModalOpen && unpayingConta && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-card rounded-2xl p-6 border-slate-800 max-w-sm w-full shadow-2xl animate-fade-in">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-amber-500" />
-                Desfazer Pagamento
-              </h3>
-              <button 
-                onClick={() => { setIsUnpayModalOpen(false); setUnpayingConta(null); }}
-                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed mb-4">
-              Você deseja reverter o pagamento da conta <strong className="text-white">{unpayingConta.nome}</strong> de <strong className="text-amber-400">{formatCurrency(unpayingConta.valor, currencySymbol)}</strong> para o status de <strong>Pendente</strong>?
-            </p>
-
-            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 mb-5">
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Esta conta gerou uma despesa correspondente em seu histórico financeiro. O que gostaria de fazer com essa movimentação?
-              </p>
-            </div>
-
-            <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={() => handleConfirmUnpay(true)}
-                className="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/10 active:scale-95 cursor-pointer"
-                disabled={unpaying}
-              >
-                {unpaying ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Sim, excluir despesa
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleConfirmUnpay(false)}
-                className="w-full bg-slate-850 hover:bg-slate-800 text-slate-300 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                disabled={unpaying}
-              >
-                Não, manter despesa (desvincular)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setIsUnpayModalOpen(false); setUnpayingConta(null); }}
-                className="w-full bg-transparent hover:bg-slate-900/40 text-slate-400 hover:text-slate-300 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                disabled={unpaying}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+          )}
+        </BottomSheet>
+      </AppShell>
+    </PullRefresh>
   )
 }

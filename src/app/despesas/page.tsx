@@ -1,125 +1,101 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
+import { useAuth }   from '@/context/AuthContext'
+import { useToast }  from '@/context/ToastContext'
+import { useDialog } from '@/context/DialogContext'
 import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/utils'
-import { 
-  TrendingDown, 
-  Plus, 
-  Trash2, 
-  X, 
-  Check, 
-  Edit2, 
-  Calendar,
-  Tag,
-  DollarSign,
-  CreditCard,
-  Briefcase
-} from 'lucide-react'
-import Loader from '@/components/Loader'
-import { toast } from 'sonner'
-import { movementService } from '@/services/movement.service'
-import { accountService } from '@/services/account.service'
-import { categoryService } from '@/services/category.service'
-import { Movement } from '@/repositories/movement.repository'
-import { Category } from '@/repositories/category.repository'
-import { Account } from '@/repositories/account.repository'
+import { TrendingDown, Plus, Calendar, Tag, DollarSign, Briefcase, CreditCard } from 'lucide-react'
 
-const FORMAS_PAGAMENTO = ['Dinheiro', 'Cartão de Débito', 'Cartão de Crédito', 'Pix', 'Boleto', 'Outro']
+import { AppShell }       from '@/components/layout/AppShell'
+import { PageHeader, PageTitle } from '@/components/layout/PageHeader'
+import { Button }         from '@/components/ui/Button'
+import { Card }           from '@/components/ui/Card'
+import { Input }          from '@/components/ui/Input'
+import { Select }         from '@/components/ui/Select'
+import { Badge }          from '@/components/ui/Badge'
+import { ActionRow }      from '@/components/finance/ActionRow'
+import { EmptyState }     from '@/components/feedback/EmptyState'
+import { BottomSheet }    from '@/components/feedback/BottomSheet'
+import { SkeletonTable }  from '@/components/feedback/Skeletons'
+import { PullRefresh }    from '@/components/mobile/PullRefresh'
+import { KPIWidget }      from '@/components/finance/Widgets'
+
+import { movementService }  from '@/services/movement.service'
+import { accountService }   from '@/services/account.service'
+import { categoryService }  from '@/services/category.service'
+import { Movement }         from '@/repositories/movement.repository'
+import { Category }         from '@/repositories/category.repository'
+import { Account }          from '@/repositories/account.repository'
+
+const TODAY = new Date().toISOString().split('T')[0]
+const FORMAS_PAGAMENTO = [
+  { value: 'Dinheiro', label: 'Dinheiro' },
+  { value: 'Cartão de Débito', label: 'Cartão de Débito' },
+  { value: 'Cartão de Crédito', label: 'Cartão de Crédito' },
+  { value: 'Pix', label: 'Pix' },
+  { value: 'Boleto', label: 'Boleto' },
+  { value: 'Outro', label: 'Outro' }
+]
 
 export default function DespesasPage() {
   const { user, profile, loading } = useAuth()
+  const toast  = useToast()
+  const dialog = useDialog()
   const router = useRouter()
 
-  const [despesas, setDespesas] = useState<Movement[]>([])
-  const [categorias, setCategorias] = useState<Category[]>([])
-  const [contas, setContas] = useState<Account[]>([])
-  
+  const [despesas,    setDespesas]    = useState<Movement[]>([])
+  const [categorias,  setCategorias]  = useState<Category[]>([])
+  const [contas,      setContas]      = useState<Account[]>([])
   const [dataLoading, setDataLoading] = useState(true)
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  
+  const [sheetOpen,   setSheetOpen]   = useState(false)
+  const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
+
   // Form State
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [valor, setValor] = useState('')
-  const [categoriaId, setCategoriaId] = useState('')
-  const [accountId, setAccountId] = useState('')
-  const [descricao, setDescricao] = useState('')
-  const [formaPagamento, setFormaPagamento] = useState(FORMAS_PAGAMENTO[0])
-  const [data, setData] = useState(new Date().toISOString().split('T')[0])
-  const [submitting, setSubmitting] = useState(false)
+  const [editingId,      setEditingId]      = useState<string | null>(null)
+  const [valor,          setValor]          = useState('')
+  const [categoriaId,    setCategoriaId]    = useState('')
+  const [accountId,      setAccountId]      = useState('')
+  const [formaPagamento, setFormaPagamento] = useState(FORMAS_PAGAMENTO[0].value)
+  const [descricao,      setDescricao]      = useState('')
+  const [data,           setData]           = useState(TODAY)
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login')
-    }
+    if (!loading && !user) router.push('/login')
   }, [user, loading, router])
 
-  const loadInitialData = async () => {
+  const load = useCallback(async () => {
     if (!user || !profile) return
     setDataLoading(true)
     try {
-      const closingDay = profile.fechamento_dia || 30
-      const { startDate, endDate } = getBillingCycleRange(closingDay)
-      const startDateStr = startDate.toISOString().split('T')[0]
-      const endDateStr = endDate.toISOString().split('T')[0]
+      const { startDate, endDate } = getBillingCycleRange(profile.fechamento_dia || 30)
+      const [catR, accR, movR] = await Promise.all([
+        categoryService.getCategoriesByType(user.id, 'despesa'),
+        accountService.getActiveAccounts(user.id),
+        movementService.getMovements(user.id, 'despesa', {
+          startDate: startDate.toISOString().split('T')[0],
+          endDate:   endDate.toISOString().split('T')[0],
+        }),
+      ])
+      if (catR.success && catR.data) { setCategorias(catR.data); if (!categoriaId && catR.data[0]) setCategoriaId(catR.data[0].id) }
+      if (accR.success && accR.data) { setContas(accR.data);     if (!accountId   && accR.data[0]) setAccountId(accR.data[0].id)   }
+      if (movR.success && movR.data)   setDespesas(movR.data)
+    } catch { toast.error('Erro ao carregar despesas.') }
+    finally  { setDataLoading(false) }
+  }, [user, profile, toast]) // eslint-disable-line
 
-      // 1. Fetch categories for despesas
-      const catResult = await categoryService.getCategoriesByType(user.id, 'despesa')
-      if (catResult.success && catResult.data) {
-        setCategorias(catResult.data)
-        if (catResult.data.length > 0) {
-          setCategoriaId(catResult.data[0].id)
-        }
-      } else if (catResult.error) {
-        toast.error(catResult.error)
-      }
+  useEffect(() => { load() }, [load])
 
-      // 2. Fetch accounts
-      const accResult = await accountService.getActiveAccounts(user.id)
-      if (accResult.success && accResult.data) {
-        setContas(accResult.data)
-        if (accResult.data.length > 0) {
-          setAccountId(accResult.data[0].id)
-        }
-      } else if (accResult.error) {
-        toast.error(accResult.error)
-      }
+  const openNew = useCallback(() => {
+    setEditingId(null); setValor(''); setDescricao(''); setData(TODAY)
+    setFormaPagamento(FORMAS_PAGAMENTO[0].value)
+    if (categorias[0]) setCategoriaId(categorias[0].id)
+    if (contas[0])     setAccountId(contas[0].id)
+    setSheetOpen(true)
+  }, [categorias, contas])
 
-      // 3. Fetch movements
-      const movResult = await movementService.getMovements(user.id, 'despesa', {
-        startDate: startDateStr,
-        endDate: endDateStr
-      })
-      if (movResult.success && movResult.data) {
-        setDespesas(movResult.data)
-      } else if (movResult.error) {
-        toast.error(movResult.error)
-      }
-    } catch (err) {
-      console.error('Error fetching data:', err)
-      toast.error('Erro ao carregar despesas.')
-    } finally {
-      setDataLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadInitialData()
-  }, [user, profile])
-
-  const handleOpenNewForm = () => {
-    setEditingId(null)
-    setValor('')
-    if (categorias.length > 0) setCategoriaId(categorias[0].id)
-    if (contas.length > 0) setAccountId(contas[0].id)
-    setFormaPagamento(FORMAS_PAGAMENTO[0])
-    setDescricao('')
-    setData(new Date().toISOString().split('T')[0])
-    setIsFormOpen(true)
-  }
-
-  const handleOpenEditForm = (desp: Movement) => {
+  const openEdit = useCallback((desp: Movement) => {
     setEditingId(desp.id)
     setValor(desp.valor.toString())
     setCategoriaId(desp.categoriaId || '')
@@ -127,373 +103,209 @@ export default function DespesasPage() {
     setFormaPagamento(desp.formaPagamento)
     setDescricao(desp.descricao || '')
     setData(desp.data)
-    setIsFormOpen(true)
-  }
-
-  const handleCloseForm = () => {
-    setIsFormOpen(false)
-    setEditingId(null)
-  }
+    setSheetOpen(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!valor || Number(valor) <= 0) {
-      toast.error('Informe um valor maior que zero.')
-      return
-    }
-    if (!categoriaId) {
-      toast.error('Selecione uma categoria.')
-      return
-    }
-    if (!accountId) {
-      toast.error('Selecione uma conta de origem.')
-      return
-    }
+    if (!valor || Number(valor) <= 0) { toast.error('Informe um valor maior que zero.'); return }
+    if (!categoriaId)                  { toast.error('Selecione uma categoria.');         return }
+    if (!accountId)                    { toast.error('Selecione uma conta.');              return }
 
-    setSubmitting(true)
+    setSubmitState('loading')
     try {
-      if (editingId) {
-        // Edit Mode
-        const result = await movementService.updateMovement(editingId, user!.id, {
-          valor: Number(valor),
-          categoriaId: categoriaId,
-          accountId: accountId,
-          formaPagamento: formaPagamento,
-          descricao: descricao.trim() || null,
-          data
-        })
+      const result = editingId
+        ? await movementService.updateMovement(editingId, user!.id, {
+            valor: Number(valor), categoriaId, accountId, formaPagamento,
+            descricao: descricao.trim() || null, data,
+          })
+        : await movementService.createMovement({
+            userId: user!.id, tipo: 'despesa', valor: Number(valor),
+            categoriaId, accountId, formaPagamento,
+            descricao: descricao.trim() || null, data, origem: 'manual',
+          })
 
-        if (result.success) {
-          toast.success('Despesa atualizada!')
-          handleCloseForm()
-          await loadInitialData()
-        } else {
-          toast.error(result.error || 'Erro ao atualizar despesa.')
-        }
+      if (result.success) {
+        setSubmitState('success')
+        toast.success(editingId ? 'Despesa atualizada!' : 'Despesa registrada!')
+        setTimeout(() => { setSheetOpen(false); setSubmitState('idle'); load() }, 800)
       } else {
-        // Create Mode
-        const result = await movementService.createMovement({
-          userId: user!.id,
-          tipo: 'despesa',
-          valor: Number(valor),
-          categoriaId: categoriaId,
-          accountId: accountId,
-          formaPagamento: formaPagamento,
-          descricao: descricao.trim() || null,
-          data,
-          origem: 'manual'
-        })
-
-        if (result.success) {
-          toast.success('Despesa registrada!')
-          handleCloseForm()
-          await loadInitialData()
-        } else {
-          toast.error(result.error || 'Erro ao registrar despesa.')
-        }
+        setSubmitState('error')
+        toast.error(result.error || 'Erro ao salvar despesa.')
+        setTimeout(() => setSubmitState('idle'), 2000)
       }
-    } catch (err: any) {
-      console.error('Error submitting despesa:', err)
-      toast.error('Erro ao registrar despesa.')
-    } finally {
-      setSubmitting(false)
+    } catch {
+      setSubmitState('error')
+      toast.error('Erro ao salvar despesa.')
+      setTimeout(() => setSubmitState('idle'), 2000)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente excluir esta despesa?')) return
-
+  const handleDelete = useCallback(async (id: string) => {
+    const ok = await dialog.confirm({
+      title:       'Excluir despesa?',
+      description: 'Essa ação não pode ser desfeita.',
+      confirmText: 'Excluir',
+      variant:     'danger',
+    })
+    if (!ok) return
     try {
       const result = await movementService.deleteMovement(id, user!.id)
-      if (result.success) {
-        toast.success('Despesa excluída.')
-        await loadInitialData()
-      } else {
-        toast.error(result.error || 'Erro ao excluir despesa.')
-      }
-    } catch (err: any) {
-      console.error('Error deleting despesa:', err)
-      toast.error('Erro ao excluir despesa.')
-    }
-  }
+      if (result.success) { toast.success('Despesa excluída.'); load() }
+      else                  toast.error(result.error || 'Erro ao excluir.')
+    } catch { toast.error('Erro ao excluir despesa.') }
+  }, [dialog, toast, user, load])
 
-  if (loading || dataLoading || !profile) {
-    return <Loader />
-  }
-
-  const currencySymbol = profile.moeda || 'R$'
-  const totalDespesas = despesas.reduce((sum, d) => sum + d.valor, 0)
+  const currency    = profile?.moeda || 'R$'
+  const totalDespesas = useMemo(() => despesas.reduce((s, r) => s + r.valor, 0), [despesas])
+  const catOptions    = useMemo(() => categorias.map(c => ({ value: c.id, label: c.nome })), [categorias])
+  const accOptions    = useMemo(() => contas.map(a => ({ value: a.id, label: a.nome })),     [contas])
 
   return (
-    <main className="container max-w-lg mx-auto px-4 pt-6 pb-20 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Saídas</span>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Despesas</h1>
-        </div>
-        {!isFormOpen && (
-          <button
-            onClick={handleOpenNewForm}
-            className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all duration-200 shadow-lg shadow-rose-600/10 active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Nova Despesa
-          </button>
+    <PullRefresh onRefresh={load}>
+      <AppShell>
+        <PageHeader
+          left={<PageTitle eyebrow="Saídas" title="Despesas" />}
+          right={
+            <Button variant="danger" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+              Nova Despesa
+            </Button>
+          }
+        />
+
+        {/* Totalizer */}
+        <KPIWidget
+          title="Total gasto no ciclo"
+          value={totalDespesas}
+          prefix={`${currency} `}
+          icon={<TrendingDown className="w-5 h-5" />}
+          accentClass="text-rose-400"
+          glowClass="bg-rose-500/8"
+          className="mb-4"
+        >
+          <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+            Fechamento dia {profile?.fechamento_dia}
+          </p>
+        </KPIWidget>
+
+        {/* List */}
+        {dataLoading ? (
+          <Card className="p-5"><SkeletonTable rows={5} /></Card>
+        ) : despesas.length === 0 ? (
+          <Card className="p-2">
+            <EmptyState
+              icon="💸"
+              title="Nenhuma despesa registrada"
+              description="Registre sua primeira saída deste ciclo de faturamento."
+              actionLabel="Nova Despesa"
+              onAction={openNew}
+            />
+          </Card>
+        ) : (
+          <Card className="p-1 divide-y divide-slate-800/40">
+            {despesas.map((desp) => {
+              const catName  = desp.financeCategories?.nome || 'Outros'
+              const catColor = desp.financeCategories?.cor  || '#f43f5e'
+              const accName  = desp.financeAccounts?.nome   || 'Carteira'
+              return (
+                <ActionRow
+                  key={desp.id}
+                  onEdit={() => openEdit(desp)}
+                  onDelete={() => handleDelete(desp.id)}
+                >
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="p-2 rounded-xl flex-shrink-0"
+                        style={{ backgroundColor: `${catColor}15`, color: catColor }}
+                      >
+                        <TrendingDown className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[var(--color-text-primary)] line-clamp-1">
+                          {desp.descricao || catName}
+                        </p>
+                        <p className="text-[11px] text-[var(--color-text-secondary)]">
+                          {catName} · {accName} · {desp.formaPagamento} · {formatDateLabel(desp.data)}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-rose-400 flex-shrink-0 ml-3">
+                      − {formatCurrency(desp.valor, currency)}
+                    </span>
+                  </div>
+                </ActionRow>
+              )
+            })}
+          </Card>
         )}
-      </div>
 
-      {/* Header Totalizer */}
-      <div className="glass-card rounded-2xl p-5 border-slate-800/80 mb-6 flex justify-between items-center relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/5 rounded-full blur-xl pointer-events-none" />
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400">
-            <TrendingDown className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 font-medium">Total gasto no ciclo</p>
-            <p className="text-xl font-bold text-rose-400 mt-0.5">
-              {formatCurrency(totalDespesas, currencySymbol)}
-            </p>
-          </div>
-        </div>
-        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium">
-          Dia de Fechamento: {profile.fechamento_dia}
-        </span>
-      </div>
-
-      {/* Form Section */}
-      {isFormOpen && (
-        <div className="glass-card rounded-2xl p-6 border-slate-800/80 mb-6 shadow-xl animate-fade-in">
-          <div className="flex justify-between items-center mb-5 pb-3 border-b border-slate-800/40">
-            <h2 className="text-sm font-semibold text-slate-200">
-              {editingId ? 'Editar Despesa' : 'Registrar Nova Despesa'}
-            </h2>
-            <button 
-              onClick={handleCloseForm}
-              className="text-slate-400 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-slate-800/40"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
+        {/* Form BottomSheet */}
+        <BottomSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          title={editingId ? 'Editar Despesa' : 'Nova Despesa'}
+        >
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Valor */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Valor</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <DollarSign className="w-4 h-4 text-rose-400" />
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={valor}
-                  onChange={(e) => setValor(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input text-rose-400 font-semibold"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Categoria */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Categoria</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Tag className="w-4 h-4" />
-                </span>
-                <select
-                  value={categoriaId}
-                  onChange={(e) => setCategoriaId(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input appearance-none bg-[#0a0f1d] cursor-pointer"
-                  disabled={submitting}
-                  required
-                >
-                  {categorias.map((cat) => (
-                    <option key={cat.id} value={cat.id} className="bg-slate-900 text-slate-200">
-                      {cat.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Origem (Conta Financeira) */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Origem (Conta Financeira)</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Briefcase className="w-4 h-4" />
-                </span>
-                <select
-                  value={accountId}
-                  onChange={(e) => setAccountId(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input appearance-none bg-[#0a0f1d] cursor-pointer"
-                  disabled={submitting}
-                  required
-                >
-                  {contas.map((acc) => (
-                    <option key={acc.id} value={acc.id} className="bg-slate-900 text-slate-200">
-                      {acc.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Forma de Pagamento */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Forma de pagamento</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <CreditCard className="w-4 h-4" />
-                </span>
-                <select
-                  value={formaPagamento}
-                  onChange={(e) => setFormaPagamento(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input appearance-none bg-[#0a0f1d] cursor-pointer"
-                  disabled={submitting}
-                  required
-                >
-                  {FORMAS_PAGAMENTO.map((f) => (
-                    <option key={f} value={f} className="bg-slate-900 text-slate-200">
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Descrição */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Descrição (opcional)</label>
-              <input
-                type="text"
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Ex: Almoço de domingo"
-                className="w-full px-4 py-2 rounded-xl text-sm glass-input"
-                disabled={submitting}
-              />
-            </div>
-
-            {/* Data */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Data</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Calendar className="w-4 h-4" />
-                </span>
-                <input
-                  type="date"
-                  value={data}
-                  onChange={(e) => setData(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input cursor-pointer"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Buttons */}
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleCloseForm}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                disabled={submitting}
-              >
+            <Input
+              label="Valor"
+              type="number" step="0.01" min="0.01"
+              value={valor}
+              onChange={e => setValor(e.target.value)}
+              placeholder="0,00"
+              leftIcon={<DollarSign className="w-4 h-4 text-rose-400" />}
+              required
+            />
+            <Select
+              label="Categoria"
+              options={catOptions}
+              value={categoriaId}
+              onChange={e => setCategoriaId(e.target.value)}
+              leftIcon={<Tag className="w-4 h-4" />}
+              required
+            />
+            <Select
+              label="Conta de origem"
+              options={accOptions}
+              value={accountId}
+              onChange={e => setAccountId(e.target.value)}
+              leftIcon={<Briefcase className="w-4 h-4" />}
+              required
+            />
+            <Select
+              label="Forma de Pagamento"
+              options={FORMAS_PAGAMENTO}
+              value={formaPagamento}
+              onChange={e => setFormaPagamento(e.target.value)}
+              leftIcon={<CreditCard className="w-4 h-4" />}
+              required
+            />
+            <Input
+              label="Descrição (opcional)"
+              type="text"
+              value={descricao}
+              onChange={e => setDescricao(e.target.value)}
+              placeholder="Ex: Almoço no restaurante"
+            />
+            <Input
+              label="Data"
+              type="date"
+              value={data}
+              onChange={e => setData(e.target.value)}
+              leftIcon={<Calendar className="w-4 h-4" />}
+              required
+            />
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setSheetOpen(false)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/10 active:scale-95 cursor-pointer"
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    {editingId ? 'Salvar' : 'Confirmar'}
-                  </>
-                )}
-              </button>
+              </Button>
+              <Button type="submit" variant="danger" state={submitState} className="flex-1">
+                {editingId ? 'Salvar' : 'Registrar'}
+              </Button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* List of Despesas */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3 px-1">Registros deste ciclo</h2>
-        {despesas.length === 0 ? (
-          <div className="glass-card rounded-2xl p-8 border-slate-800/80 text-center">
-            <p className="text-xs text-slate-500 font-medium">
-              Nenhuma despesa registrada neste ciclo de faturamento.
-            </p>
-          </div>
-        ) : (
-          despesas.map((desp) => {
-            const catName = desp.financeCategories?.nome || 'Outros'
-            const catColor = desp.financeCategories?.cor || '#f43f5e'
-            const accName = desp.financeAccounts?.nome || 'Carteira'
-
-            return (
-              <div 
-                key={desp.id} 
-                className="glass-card rounded-xl p-4 border-slate-800/80 flex items-center justify-between shadow-md relative group hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="p-2 rounded-xl"
-                    style={{ 
-                      backgroundColor: `${catColor}10`,
-                      color: catColor
-                    }}
-                  >
-                    <TrendingDown className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-200 line-clamp-1">
-                      {desp.descricao || catName}
-                    </h3>
-                    <p className="text-[10px] text-slate-400">
-                      {catName} • {accName} • {desp.formaPagamento} • {formatDateLabel(desp.data)}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="text-sm font-bold text-rose-400">
-                    - {formatCurrency(desp.valor, currencySymbol)}
-                  </div>
-                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleOpenEditForm(desp)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
-                      title="Editar"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(desp.id)}
-                      className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                      title="Excluir"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })
-        )}
-      </div>
-    </main>
+        </BottomSheet>
+      </AppShell>
+    </PullRefresh>
   )
 }

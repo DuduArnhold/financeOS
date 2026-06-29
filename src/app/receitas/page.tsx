@@ -1,469 +1,292 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
+import { useAuth }   from '@/context/AuthContext'
+import { useToast }  from '@/context/ToastContext'
+import { useDialog } from '@/context/DialogContext'
 import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/utils'
-import { 
-  TrendingUp, 
-  Plus, 
-  Trash2, 
-  X, 
-  Check, 
-  Edit2, 
-  Calendar,
-  Tag,
-  DollarSign,
-  Briefcase
-} from 'lucide-react'
-import Loader from '@/components/Loader'
-import { toast } from 'sonner'
-import { movementService } from '@/services/movement.service'
-import { accountService } from '@/services/account.service'
-import { categoryService } from '@/services/category.service'
-import { Movement } from '@/repositories/movement.repository'
-import { Category } from '@/repositories/category.repository'
-import { Account } from '@/repositories/account.repository'
+import { TrendingUp, Plus, Calendar, Tag, DollarSign, Briefcase } from 'lucide-react'
+
+import { AppShell }       from '@/components/layout/AppShell'
+import { PageHeader, PageTitle } from '@/components/layout/PageHeader'
+import { Button }         from '@/components/ui/Button'
+import { Card }           from '@/components/ui/Card'
+import { Input }          from '@/components/ui/Input'
+import { Select }         from '@/components/ui/Select'
+import { Badge }          from '@/components/ui/Badge'
+import { ActionRow }      from '@/components/finance/ActionRow'
+import { EmptyState }     from '@/components/feedback/EmptyState'
+import { BottomSheet }    from '@/components/feedback/BottomSheet'
+import { SkeletonTable }  from '@/components/feedback/Skeletons'
+import { PullRefresh }    from '@/components/mobile/PullRefresh'
+import { KPIWidget }      from '@/components/finance/Widgets'
+
+import { movementService }  from '@/services/movement.service'
+import { accountService }   from '@/services/account.service'
+import { categoryService }  from '@/services/category.service'
+import { Movement }         from '@/repositories/movement.repository'
+import { Category }         from '@/repositories/category.repository'
+import { Account }          from '@/repositories/account.repository'
+
+const TODAY = new Date().toISOString().split('T')[0]
 
 export default function ReceitasPage() {
   const { user, profile, loading } = useAuth()
+  const toast  = useToast()
+  const dialog = useDialog()
   const router = useRouter()
 
-  const [receitas, setReceitas] = useState<Movement[]>([])
-  const [categorias, setCategorias] = useState<Category[]>([])
-  const [contas, setContas] = useState<Account[]>([])
-  
+  const [receitas,    setReceitas]    = useState<Movement[]>([])
+  const [categorias,  setCategorias]  = useState<Category[]>([])
+  const [contas,      setContas]      = useState<Account[]>([])
   const [dataLoading, setDataLoading] = useState(true)
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  
-  // Form State
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [valor, setValor] = useState('')
+  const [sheetOpen,   setSheetOpen]   = useState(false)
+  const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
+
+  // Form
+  const [editingId,   setEditingId]   = useState<string | null>(null)
+  const [valor,       setValor]       = useState('')
   const [categoriaId, setCategoriaId] = useState('')
-  const [accountId, setAccountId] = useState('')
-  const [descricao, setDescricao] = useState('')
-  const [data, setData] = useState(new Date().toISOString().split('T')[0])
-  const [submitting, setSubmitting] = useState(false)
+  const [accountId,   setAccountId]   = useState('')
+  const [descricao,   setDescricao]   = useState('')
+  const [data,        setData]        = useState(TODAY)
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login')
-    }
+    if (!loading && !user) router.push('/login')
   }, [user, loading, router])
 
-  const loadInitialData = async () => {
+  const load = useCallback(async () => {
     if (!user || !profile) return
     setDataLoading(true)
     try {
-      const closingDay = profile.fechamento_dia || 30
-      const { startDate, endDate } = getBillingCycleRange(closingDay)
-      const startDateStr = startDate.toISOString().split('T')[0]
-      const endDateStr = endDate.toISOString().split('T')[0]
+      const { startDate, endDate } = getBillingCycleRange(profile.fechamento_dia || 30)
+      const [catR, accR, movR] = await Promise.all([
+        categoryService.getCategoriesByType(user.id, 'receita'),
+        accountService.getActiveAccounts(user.id),
+        movementService.getMovements(user.id, 'receita', {
+          startDate: startDate.toISOString().split('T')[0],
+          endDate:   endDate.toISOString().split('T')[0],
+        }),
+      ])
+      if (catR.success && catR.data) { setCategorias(catR.data); if (!categoriaId && catR.data[0]) setCategoriaId(catR.data[0].id) }
+      if (accR.success && accR.data) { setContas(accR.data);     if (!accountId   && accR.data[0]) setAccountId(accR.data[0].id)   }
+      if (movR.success && movR.data)   setReceitas(movR.data)
+    } catch { toast.error('Erro ao carregar receitas.') }
+    finally  { setDataLoading(false) }
+  }, [user, profile, toast]) // eslint-disable-line
 
-      // 1. Fetch categories
-      const catResult = await categoryService.getCategoriesByType(user.id, 'receita')
-      if (catResult.success && catResult.data) {
-        setCategorias(catResult.data)
-        if (catResult.data.length > 0) {
-          setCategoriaId(catResult.data[0].id)
-        }
-      } else if (catResult.error) {
-        toast.error(catResult.error)
-      }
+  useEffect(() => { load() }, [load])
 
-      // 2. Fetch accounts
-      const accResult = await accountService.getActiveAccounts(user.id)
-      if (accResult.success && accResult.data) {
-        setContas(accResult.data)
-        if (accResult.data.length > 0) {
-          setAccountId(accResult.data[0].id)
-        }
-      } else if (accResult.error) {
-        toast.error(accResult.error)
-      }
+  const openNew = useCallback(() => {
+    setEditingId(null); setValor(''); setDescricao(''); setData(TODAY)
+    if (categorias[0]) setCategoriaId(categorias[0].id)
+    if (contas[0])     setAccountId(contas[0].id)
+    setSheetOpen(true)
+  }, [categorias, contas])
 
-      // 3. Fetch movements
-      const movResult = await movementService.getMovements(user.id, 'receita', {
-        startDate: startDateStr,
-        endDate: endDateStr
-      })
-      if (movResult.success && movResult.data) {
-        setReceitas(movResult.data)
-      } else if (movResult.error) {
-        toast.error(movResult.error)
-      }
-    } catch (err) {
-      console.error('Error fetching data:', err)
-      toast.error('Erro ao carregar receitas.')
-    } finally {
-      setDataLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadInitialData()
-  }, [user, profile])
-
-  const handleOpenNewForm = () => {
-    setEditingId(null)
-    setValor('')
-    if (categorias.length > 0) setCategoriaId(categorias[0].id)
-    if (contas.length > 0) setAccountId(contas[0].id)
-    setDescricao('')
-    setData(new Date().toISOString().split('T')[0])
-    setIsFormOpen(true)
-  }
-
-  const handleOpenEditForm = (rec: Movement) => {
+  const openEdit = useCallback((rec: Movement) => {
     setEditingId(rec.id)
     setValor(rec.valor.toString())
     setCategoriaId(rec.categoriaId || '')
     setAccountId(rec.accountId)
     setDescricao(rec.descricao || '')
     setData(rec.data)
-    setIsFormOpen(true)
-  }
-
-  const handleCloseForm = () => {
-    setIsFormOpen(false)
-    setEditingId(null)
-  }
+    setSheetOpen(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!valor || Number(valor) <= 0) {
-      toast.error('Informe um valor maior que zero.')
-      return
-    }
-    if (!categoriaId) {
-      toast.error('Selecione uma categoria.')
-      return
-    }
-    if (!accountId) {
-      toast.error('Selecione uma conta financeira.')
-      return
-    }
+    if (!valor || Number(valor) <= 0) { toast.error('Informe um valor maior que zero.'); return }
+    if (!categoriaId)                  { toast.error('Selecione uma categoria.');         return }
+    if (!accountId)                    { toast.error('Selecione uma conta.');              return }
 
-    setSubmitting(true)
+    setSubmitState('loading')
     try {
-      if (editingId) {
-        // Edit Mode
-        const result = await movementService.updateMovement(editingId, user!.id, {
-          valor: Number(valor),
-          categoriaId: categoriaId,
-          accountId: accountId,
-          descricao: descricao.trim() || null,
-          data
-        })
+      const result = editingId
+        ? await movementService.updateMovement(editingId, user!.id, {
+            valor: Number(valor), categoriaId, accountId,
+            descricao: descricao.trim() || null, data,
+          })
+        : await movementService.createMovement({
+            userId: user!.id, tipo: 'receita', valor: Number(valor),
+            categoriaId, accountId, formaPagamento: 'Pix',
+            descricao: descricao.trim() || null, data, origem: 'manual',
+          })
 
-        if (result.success) {
-          toast.success('Receita atualizada!')
-          handleCloseForm()
-          await loadInitialData()
-        } else {
-          toast.error(result.error || 'Erro ao atualizar receita.')
-        }
+      if (result.success) {
+        setSubmitState('success')
+        toast.success(editingId ? 'Receita atualizada!' : 'Receita registrada!')
+        setTimeout(() => { setSheetOpen(false); setSubmitState('idle'); load() }, 800)
       } else {
-        // Create Mode
-        const result = await movementService.createMovement({
-          userId: user!.id,
-          tipo: 'receita',
-          valor: Number(valor),
-          categoriaId: categoriaId,
-          accountId: accountId,
-          formaPagamento: 'Pix', // Valor default para o MVP
-          descricao: descricao.trim() || null,
-          data,
-          origem: 'manual'
-        })
-
-        if (result.success) {
-          toast.success('Receita registrada!')
-          handleCloseForm()
-          await loadInitialData()
-        } else {
-          toast.error(result.error || 'Erro ao registrar receita.')
-        }
+        setSubmitState('error')
+        toast.error(result.error || 'Erro ao salvar receita.')
+        setTimeout(() => setSubmitState('idle'), 2000)
       }
-    } catch (err: any) {
-      console.error('Error submitting receita:', err)
-      toast.error('Erro ao registrar receita.')
-    } finally {
-      setSubmitting(false)
+    } catch {
+      setSubmitState('error')
+      toast.error('Erro ao salvar receita.')
+      setTimeout(() => setSubmitState('idle'), 2000)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente excluir esta receita?')) return
-
+  const handleDelete = useCallback(async (id: string) => {
+    const ok = await dialog.confirm({
+      title:       'Excluir receita?',
+      description: 'Essa ação não pode ser desfeita.',
+      confirmText: 'Excluir',
+      variant:     'danger',
+    })
+    if (!ok) return
     try {
       const result = await movementService.deleteMovement(id, user!.id)
-      if (result.success) {
-        toast.success('Receita excluída.')
-        await loadInitialData()
-      } else {
-        toast.error(result.error || 'Erro ao excluir receita.')
-      }
-    } catch (err: any) {
-      console.error('Error deleting receita:', err)
-      toast.error('Erro ao excluir receita.')
-    }
-  }
+      if (result.success) { toast.success('Receita excluída.'); load() }
+      else                  toast.error(result.error || 'Erro ao excluir.')
+    } catch { toast.error('Erro ao excluir receita.') }
+  }, [dialog, toast, user, load])
 
-  if (loading || dataLoading || !profile) {
-    return <Loader />
-  }
-
-  const currencySymbol = profile.moeda || 'R$'
-  const totalReceitas = receitas.reduce((sum, r) => sum + r.valor, 0)
+  const currency    = profile?.moeda || 'R$'
+  const totalReceitas = useMemo(() => receitas.reduce((s, r) => s + r.valor, 0), [receitas])
+  const catOptions    = useMemo(() => categorias.map(c => ({ value: c.id, label: c.nome })), [categorias])
+  const accOptions    = useMemo(() => contas.map(a => ({ value: a.id, label: a.nome })),     [contas])
 
   return (
-    <main className="container max-w-lg mx-auto px-4 pt-6 pb-20 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Entradas</span>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Receitas</h1>
-        </div>
-        {!isFormOpen && (
-          <button
-            onClick={handleOpenNewForm}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all duration-200 shadow-lg shadow-emerald-600/10 active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Nova Receita
-          </button>
+    <PullRefresh onRefresh={load}>
+      <AppShell>
+        <PageHeader
+          left={<PageTitle eyebrow="Entradas" title="Receitas" />}
+          right={
+            <Button variant="success-variant" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+              Nova Receita
+            </Button>
+          }
+        />
+
+        {/* Totalizer */}
+        <KPIWidget
+          title="Total recebido no ciclo"
+          value={totalReceitas}
+          prefix={`${currency} `}
+          icon={<TrendingUp className="w-5 h-5" />}
+          accentClass="text-emerald-400"
+          glowClass="bg-emerald-500/8"
+          className="mb-4"
+        >
+          <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+            Fechamento dia {profile?.fechamento_dia}
+          </p>
+        </KPIWidget>
+
+        {/* List */}
+        {dataLoading ? (
+          <Card className="p-5"><SkeletonTable rows={5} /></Card>
+        ) : receitas.length === 0 ? (
+          <Card className="p-2">
+            <EmptyState
+              icon="💰"
+              title="Nenhuma receita registrada"
+              description="Registre sua primeira entrada deste ciclo de faturamento."
+              actionLabel="Nova Receita"
+              onAction={openNew}
+            />
+          </Card>
+        ) : (
+          <Card className="p-1 divide-y divide-slate-800/40">
+            {receitas.map((rec) => {
+              const catName  = rec.financeCategories?.nome || 'Outros'
+              const catColor = rec.financeCategories?.cor  || '#10b981'
+              const accName  = rec.financeAccounts?.nome   || 'Carteira'
+              return (
+                <ActionRow
+                  key={rec.id}
+                  onEdit={() => openEdit(rec)}
+                  onDelete={() => handleDelete(rec.id)}
+                >
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="p-2 rounded-xl flex-shrink-0"
+                        style={{ backgroundColor: `${catColor}15`, color: catColor }}
+                      >
+                        <TrendingUp className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[var(--color-text-primary)] line-clamp-1">
+                          {rec.descricao || catName}
+                        </p>
+                        <p className="text-[11px] text-[var(--color-text-secondary)]">
+                          {catName} · {accName} · {formatDateLabel(rec.data)}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-400 flex-shrink-0 ml-3">
+                      + {formatCurrency(rec.valor, currency)}
+                    </span>
+                  </div>
+                </ActionRow>
+              )
+            })}
+          </Card>
         )}
-      </div>
 
-      {/* Header Totalizer */}
-      <div className="glass-card rounded-2xl p-5 border-slate-800/80 mb-6 flex justify-between items-center relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 font-medium">Total recebido no ciclo</p>
-            <p className="text-xl font-bold text-emerald-400 mt-0.5">
-              {formatCurrency(totalReceitas, currencySymbol)}
-            </p>
-          </div>
-        </div>
-        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium">
-          Dia de Fechamento: {profile.fechamento_dia}
-        </span>
-      </div>
-
-      {/* Form Section */}
-      {isFormOpen && (
-        <div className="glass-card rounded-2xl p-6 border-slate-800/80 mb-6 shadow-xl animate-fade-in">
-          <div className="flex justify-between items-center mb-5 pb-3 border-b border-slate-800/40">
-            <h2 className="text-sm font-semibold text-slate-200">
-              {editingId ? 'Editar Receita' : 'Registrar Nova Receita'}
-            </h2>
-            <button 
-              onClick={handleCloseForm}
-              className="text-slate-400 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-slate-800/40"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
+        {/* Form BottomSheet */}
+        <BottomSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          title={editingId ? 'Editar Receita' : 'Nova Receita'}
+        >
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Valor */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Valor</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <DollarSign className="w-4 h-4 text-emerald-400" />
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={valor}
-                  onChange={(e) => setValor(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input text-emerald-400 font-semibold"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Categoria */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Categoria</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Tag className="w-4 h-4" />
-                </span>
-                <select
-                  value={categoriaId}
-                  onChange={(e) => setCategoriaId(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input appearance-none bg-[#0a0f1d] cursor-pointer"
-                  disabled={submitting}
-                  required
-                >
-                  {categorias.map((cat) => (
-                    <option key={cat.id} value={cat.id} className="bg-slate-900 text-slate-200">
-                      {cat.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Conta Financeira */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Destino (Conta Financeira)</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Briefcase className="w-4 h-4" />
-                </span>
-                <select
-                  value={accountId}
-                  onChange={(e) => setAccountId(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input appearance-none bg-[#0a0f1d] cursor-pointer"
-                  disabled={submitting}
-                  required
-                >
-                  {contas.map((acc) => (
-                    <option key={acc.id} value={acc.id} className="bg-slate-900 text-slate-200">
-                      {acc.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Descrição */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Descrição (opcional)</label>
-              <input
-                type="text"
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Ex: Freelance da semana"
-                className="w-full px-4 py-2 rounded-xl text-sm glass-input"
-                disabled={submitting}
-              />
-            </div>
-
-            {/* Data */}
-            <div className="space-y-1">
-              <label className="text-slate-300 text-xs font-medium">Data</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
-                  <Calendar className="w-4 h-4" />
-                </span>
-                <input
-                  type="date"
-                  value={data}
-                  onChange={(e) => setData(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl text-sm glass-input cursor-pointer"
-                  disabled={submitting}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Buttons */}
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleCloseForm}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer"
-                disabled={submitting}
-              >
+            <Input
+              label="Valor"
+              type="number" step="0.01" min="0.01"
+              value={valor}
+              onChange={e => setValor(e.target.value)}
+              placeholder="0,00"
+              leftIcon={<DollarSign className="w-4 h-4 text-emerald-400" />}
+              required
+            />
+            <Select
+              label="Categoria"
+              options={catOptions}
+              value={categoriaId}
+              onChange={e => setCategoriaId(e.target.value)}
+              leftIcon={<Tag className="w-4 h-4" />}
+              required
+            />
+            <Select
+              label="Conta de destino"
+              options={accOptions}
+              value={accountId}
+              onChange={e => setAccountId(e.target.value)}
+              leftIcon={<Briefcase className="w-4 h-4" />}
+              required
+            />
+            <Input
+              label="Descrição (opcional)"
+              type="text"
+              value={descricao}
+              onChange={e => setDescricao(e.target.value)}
+              placeholder="Ex: Freelance da semana"
+            />
+            <Input
+              label="Data"
+              type="date"
+              value={data}
+              onChange={e => setData(e.target.value)}
+              leftIcon={<Calendar className="w-4 h-4" />}
+              required
+            />
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setSheetOpen(false)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/10 active:scale-95 cursor-pointer"
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    {editingId ? 'Salvar' : 'Confirmar'}
-                  </>
-                )}
-              </button>
+              </Button>
+              <Button type="submit" variant="success-variant" state={submitState} className="flex-1">
+                {editingId ? 'Salvar' : 'Registrar'}
+              </Button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* List of Receitas */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3 px-1">Registros deste ciclo</h2>
-        {receitas.length === 0 ? (
-          <div className="glass-card rounded-2xl p-8 border-slate-800/80 text-center">
-            <p className="text-xs text-slate-500 font-medium">
-              Nenhuma receita registrada neste ciclo de faturamento.
-            </p>
-          </div>
-        ) : (
-          receitas.map((rec) => {
-            const catName = rec.financeCategories?.nome || 'Outros'
-            const catColor = rec.financeCategories?.cor || '#10b981'
-            const accName = rec.financeAccounts?.nome || 'Carteira'
-
-            return (
-              <div 
-                key={rec.id} 
-                className="glass-card rounded-xl p-4 border-slate-800/80 flex items-center justify-between shadow-md relative group hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="p-2 rounded-xl"
-                    style={{ 
-                      backgroundColor: `${catColor}10`,
-                      color: catColor
-                    }}
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-200 line-clamp-1">
-                      {rec.descricao || catName}
-                    </h3>
-                    <p className="text-[10px] text-slate-400">
-                      {catName} • {accName} • {formatDateLabel(rec.data)}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="text-sm font-bold text-emerald-400">
-                    + {formatCurrency(rec.valor, currencySymbol)}
-                  </div>
-                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleOpenEditForm(rec)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
-                      title="Editar"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(rec.id)}
-                      className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                      title="Excluir"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })
-        )}
-      </div>
-    </main>
+        </BottomSheet>
+      </AppShell>
+    </PullRefresh>
   )
 }
