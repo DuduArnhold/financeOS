@@ -58,6 +58,6 @@ export function formatCurrency(value: number, symbol: string = 'R$'): string {
  */
 export function formatDateLabel(dateString: string): string {
   if (!dateString) return ''
-  const [year, month, day] = dateString.split('-')
+  const [, month, day] = dateString.split('-')
   return `${day}/${month}`
 }

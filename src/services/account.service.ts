@@ -6,9 +6,10 @@ export const accountService = {
     try {
       const data = await accountRepository.getActiveAccounts(userId)
       return { success: true, data }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in getActiveAccounts service:', err)
-      return { success: false, error: err.message || 'Erro ao carregar contas financeiras.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar contas financeiras.'
+      return { success: false, error: errorMsg }
     }
   }
 }

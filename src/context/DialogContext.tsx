@@ -5,7 +5,7 @@
 //      const ok = await confirm({ title: 'Excluir?', ... })
 
 import {
-  createContext, useContext, useCallback, useRef, useState
+  createContext, useContext, useCallback, useState
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 

@@ -8,8 +8,6 @@ import { createContext, useContext, useCallback } from 'react'
 import { toast as sonnerToast } from 'sonner'
 import { haptic } from '@/lib/haptic'
 
-type ToastType = 'success' | 'error' | 'warning' | 'info'
-
 interface ToastOptions {
   description?: string
   duration?: number

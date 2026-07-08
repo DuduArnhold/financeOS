@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth }   from '@/context/AuthContext'
 import { useToast }  from '@/context/ToastContext'
@@ -15,7 +15,6 @@ import { Button }         from '@/components/ui/Button'
 import { Card }           from '@/components/ui/Card'
 import { Input }          from '@/components/ui/Input'
 import { Select }         from '@/components/ui/Select'
-import { Badge }          from '@/components/ui/Badge'
 import { SkeletonCard }   from '@/components/feedback/Skeletons'
 
 const CURRENCIES = [
@@ -27,7 +26,7 @@ const CURRENCIES = [
 
 export default function PerfilPage() {
   const { user, profile, loading, refreshProfile, signOut } = useAuth()
-  const { theme, setTheme } = useTheme()
+  const { setTheme } = useTheme()
   const toast  = useToast()
   const dialog = useDialog()
   const router = useRouter()
@@ -47,10 +46,13 @@ export default function PerfilPage() {
   // Sync state with profile once loaded
   useEffect(() => {
     if (profile) {
-      setNome(profile.nome)
-      setMoeda(profile.moeda || 'R$')
-      setFechamentoDia(profile.fechamento_dia || 30)
-      setTema((profile.tema as any) || 'dark')
+      const timeout = setTimeout(() => {
+        setNome(profile.nome)
+        setMoeda(profile.moeda || 'R$')
+        setFechamentoDia(profile.fechamento_dia || 30)
+        setTema((profile.tema as 'dark' | 'light' | 'system') || 'dark')
+      }, 0)
+      return () => clearTimeout(timeout)
     }
   }, [profile])
 
@@ -86,7 +88,7 @@ export default function PerfilPage() {
         toast.error(result.error || 'Erro ao salvar configurações.')
         setTimeout(() => setSubmitState('idle'), 2000)
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error saving profile settings:', err)
       setSubmitState('error')
       toast.error('Erro ao salvar configurações.')

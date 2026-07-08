@@ -150,9 +150,10 @@ export const dashboardService = {
     try {
       const data = await repository.getSnapshot(userId, range)
       return { success: true, data }
-    } catch (err: any) {
+    } catch (err) {
       logger.error('dashboardService.getSnapshot error', { error: err })
-      return { success: false, error: err.message || 'Erro ao calcular resumo do painel.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao calcular resumo do painel.'
+      return { success: false, error: errorMsg }
     }
   }
 }

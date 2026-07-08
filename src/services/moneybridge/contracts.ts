@@ -29,7 +29,7 @@ export interface MoneyBridgeConnector {
   isAvailable: boolean
   
   // Métodos básicos de integração
-  syncAccount(credentials: any): Promise<BankAccountSnapshot>
+  syncAccount(credentials: unknown): Promise<BankAccountSnapshot>
   fetchTransactions(startDate: string, endDate: string): Promise<BankTransactionImport[]>
 }
 

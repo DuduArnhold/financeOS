@@ -19,7 +19,24 @@ export interface Transfer {
   } | null
 }
 
-const mapToCamel = (data: any): Transfer => ({
+interface DbTransfer {
+  id: string
+  user_id: string
+  source_account_id: string
+  target_account_id: string
+  valor: number | string
+  data: string
+  descricao: string | null
+  created_at: string
+  source_account?: {
+    nome: string
+  } | null
+  target_account?: {
+    nome: string
+  } | null
+}
+
+const mapToCamel = (data: DbTransfer): Transfer => ({
   id: data.id,
   userId: data.user_id,
   sourceAccountId: data.source_account_id,
@@ -50,7 +67,8 @@ export const transferRepository = {
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    return (data || []).map(mapToCamel)
+    const dbData = data as DbTransfer[] | null
+    return (dbData || []).map(mapToCamel)
   },
 
   async getById(id: string, userId: string): Promise<Transfer | null> {
@@ -66,7 +84,7 @@ export const transferRepository = {
       .maybeSingle()
 
     if (error) throw error
-    return data ? mapToCamel(data) : null
+    return data ? mapToCamel(data as DbTransfer) : null
   },
 
   async insert(
@@ -90,7 +108,7 @@ export const transferRepository = {
       .single()
 
     if (error) throw error
-    return mapToCamel(data)
+    return mapToCamel(data as DbTransfer)
   },
 
   async delete(id: string, userId: string): Promise<void> {

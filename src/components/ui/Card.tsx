@@ -24,13 +24,13 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(({
   if (animate || hover || glow) {
     return (
       <motion.div
-        ref={ref as any}
+        ref={ref as React.Ref<HTMLDivElement>}
         initial={animate ? { opacity: 0, y: 10 } : undefined}
         animate={animate ? { opacity: 1, y: 0  } : undefined}
         transition={{ duration: 0.18, ease: [0.215, 0.61, 0.355, 1] }}
         whileHover={hover ? { scale: 1.015 } : undefined}
         className={`${base} ${glow ? 'hover:shadow-indigo-500/10 hover:shadow-xl' : ''}`}
-        {...(props as any)}
+        {...(props as Record<string, unknown>)}
       >
         {children}
       </motion.div>

@@ -13,9 +13,10 @@ export const contaService = {
     try {
       const data = await contaRepository.getAll(userId)
       return { success: true, data }
-    } catch (err: any) {
-      logger.error('Error in getContas service:', err)
-      return { success: false, error: err.message || 'Erro ao carregar contas.' }
+    } catch (err) {
+      logger.error('Error in getContas service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar contas.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -47,9 +48,10 @@ export const contaService = {
         categoriaPreferidaId: null,
       })
       return { success: true, data: newConta }
-    } catch (err: any) {
-      logger.error('Error in createConta service:', err)
-      return { success: false, error: err.message || 'Erro ao criar conta.' }
+    } catch (err) {
+      logger.error('Error in createConta service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao criar conta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -79,9 +81,10 @@ export const contaService = {
         recorrente,
       })
       return { success: true, data: updated }
-    } catch (err: any) {
-      logger.error('Error in updateConta service:', err)
-      return { success: false, error: err.message || 'Erro ao atualizar conta.' }
+    } catch (err) {
+      logger.error('Error in updateConta service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao atualizar conta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -89,9 +92,10 @@ export const contaService = {
     try {
       await contaRepository.softDelete(id, userId)
       return { success: true }
-    } catch (err: any) {
-      logger.error('Error in deleteConta service:', err)
-      return { success: false, error: err.message || 'Erro ao excluir conta.' }
+    } catch (err) {
+      logger.error('Error in deleteConta service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao excluir conta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -143,9 +147,10 @@ export const contaService = {
       })
 
       return { success: true }
-    } catch (err: any) {
-      logger.error('Error in payConta service:', err)
-      return { success: false, error: err.message || 'Erro ao efetuar pagamento da conta.' }
+    } catch (err) {
+      logger.error('Error in payConta service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao efetuar pagamento da conta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -162,9 +167,10 @@ export const contaService = {
       })
 
       return { success: true }
-    } catch (err: any) {
-      logger.error('Error in unpayConta service:', err)
-      return { success: false, error: err.message || 'Erro ao reverter pagamento da conta.' }
+    } catch (err) {
+      logger.error('Error in unpayConta service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao reverter pagamento da conta.'
+      return { success: false, error: errorMsg }
     }
   }
 }

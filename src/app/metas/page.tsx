@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth }   from '@/context/AuthContext'
 import { useToast }  from '@/context/ToastContext'
@@ -68,7 +68,10 @@ export default function MetasPage() {
   }, [user, profile, toast])
 
   useEffect(() => {
-    loadMetas()
+    const timeout = setTimeout(() => {
+      loadMetas()
+    }, 0)
+    return () => clearTimeout(timeout)
   }, [loadMetas])
 
   const openNew = useCallback(() => {
@@ -168,7 +171,7 @@ export default function MetasPage() {
         )
         toast.error(result.error || 'Erro ao registrar aporte.')
       }
-    } catch (err: any) {
+    } catch (err) {
       // Revert on exception
       setMetas(prev => 
         prev.map(m => m.id === meta.id ? { ...m, valorAtual: originalValue } : m)

@@ -19,9 +19,10 @@ export const profileService = {
 
       logger.info('profileService: successfully updated profile & settings')
       return { success: true }
-    } catch (err: any) {
+    } catch (err) {
       logger.error('profileService: error updating profile & settings', { error: err })
-      return { success: false, error: err.message || 'Erro ao salvar configurações do perfil.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao salvar configurações do perfil.'
+      return { success: false, error: errorMsg }
     }
   }
 }

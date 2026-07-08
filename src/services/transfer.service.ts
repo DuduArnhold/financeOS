@@ -8,9 +8,10 @@ export const transferService = {
     try {
       const data = await transferRepository.getAll(userId)
       return { success: true, data }
-    } catch (err: any) {
+    } catch (err) {
       logger.error('Error in getTransfers service', { error: err })
-      return { success: false, error: err.message || 'Erro ao carregar transferências.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar transferências.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -79,9 +80,10 @@ export const transferService = {
       })
 
       return { success: true, data: newTransfer }
-    } catch (err: any) {
+    } catch (err) {
       logger.error('Error in createTransfer service', { error: err })
-      return { success: false, error: err.message || 'Erro ao realizar transferência.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao realizar transferência.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -94,9 +96,10 @@ export const transferService = {
       await transferRepository.delete(id, userId)
 
       return { success: true }
-    } catch (err: any) {
+    } catch (err) {
       logger.error('Error in deleteTransfer service', { error: err })
-      return { success: false, error: err.message || 'Erro ao excluir transferência.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao excluir transferência.'
+      return { success: false, error: errorMsg }
     }
   }
 }

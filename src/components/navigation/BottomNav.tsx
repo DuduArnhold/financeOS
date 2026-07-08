@@ -8,7 +8,7 @@ import {
   ArrowUpCircle,
   ArrowDownCircle,
   CalendarDays,
-  Target,
+  Plug,
   User
 } from 'lucide-react'
 
@@ -17,7 +17,7 @@ const navItems = [
   { href: '/receitas', label: 'Receitas',  icon: ArrowUpCircle,   activeColor: 'text-emerald-400', activeBg: 'bg-emerald-500/15' },
   { href: '/despesas', label: 'Despesas',  icon: ArrowDownCircle, activeColor: 'text-rose-400',    activeBg: 'bg-rose-500/15' },
   { href: '/contas',   label: 'Contas',    icon: CalendarDays,    activeColor: 'text-amber-400',   activeBg: 'bg-amber-500/15' },
-  { href: '/metas',    label: 'Metas',     icon: Target,          activeColor: 'text-violet-400',  activeBg: 'bg-violet-500/15' },
+  { href: '/integracoes', label: 'Integrações', icon: Plug,       activeColor: 'text-violet-400',  activeBg: 'bg-violet-500/15' },
   { href: '/perfil',   label: 'Perfil',    icon: User,            activeColor: 'text-sky-400',     activeBg: 'bg-sky-500/15' },
 ]
 

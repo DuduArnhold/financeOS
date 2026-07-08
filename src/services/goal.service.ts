@@ -1,4 +1,4 @@
-import { metaRepository, Meta, Deposit } from '@/repositories/meta.repository'
+import { metaRepository, Deposit } from '@/repositories/meta.repository'
 import { ServiceResult } from './conta.service'
 
 export interface MetaConsolidated {
@@ -27,9 +27,10 @@ export const goalService = {
       }))
 
       return { success: true, data: consolidated }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in getMetas service:', err)
-      return { success: false, error: err.message || 'Erro ao carregar metas.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar metas.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -72,9 +73,10 @@ export const goalService = {
           valorAtual,
         },
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in createMeta service:', err)
-      return { success: false, error: err.message || 'Erro ao criar meta.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao criar meta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -112,9 +114,10 @@ export const goalService = {
           valorAtual,
         },
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in updateMeta service:', err)
-      return { success: false, error: err.message || 'Erro ao atualizar meta.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao atualizar meta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -122,9 +125,10 @@ export const goalService = {
     try {
       await metaRepository.delete(id, userId)
       return { success: true }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in deleteMeta service:', err)
-      return { success: false, error: err.message || 'Erro ao excluir meta.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao excluir meta.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -152,9 +156,10 @@ export const goalService = {
       })
 
       return { success: true, data: deposit }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in depositToMeta service:', err)
-      return { success: false, error: err.message || 'Erro ao realizar aporte.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao realizar aporte.'
+      return { success: false, error: errorMsg }
     }
   }
 }

@@ -6,9 +6,10 @@ export const categoryService = {
     try {
       const data = await categoryRepository.getByType(userId, tipo)
       return { success: true, data }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in getCategoriesByType service:', err)
-      return { success: false, error: err.message || 'Erro ao carregar categorias.' }
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar categorias.'
+      return { success: false, error: errorMsg }
     }
   }
 }

@@ -24,20 +24,20 @@ export type PlatformEventName = keyof PlatformEventMap
 type SubscriptionCallback<T extends PlatformEventName> = (payload: PlatformEventMap[T]) => void
 
 class EventBus {
-  private subscribers: Map<string, Set<SubscriptionCallback<any>>> = new Map()
+  private subscribers: Map<string, Set<(payload: never) => void>> = new Map()
 
   subscribe<T extends PlatformEventName>(event: T, callback: SubscriptionCallback<T>): () => void {
     if (!this.subscribers.has(event)) {
       this.subscribers.set(event, new Set())
     }
     
-    this.subscribers.get(event)!.add(callback)
+    this.subscribers.get(event)!.add(callback as unknown as (payload: never) => void)
     
     // Return unsubscribe function
     return () => {
       const callbacks = this.subscribers.get(event)
       if (callbacks) {
-        callbacks.delete(callback)
+        callbacks.delete(callback as unknown as (payload: never) => void)
         if (callbacks.size === 0) {
           this.subscribers.delete(event)
         }
@@ -57,7 +57,8 @@ class EventBus {
 
     callbacks.forEach(callback => {
       try {
-        callback(payload)
+        const cb = callback as unknown as SubscriptionCallback<T>
+        cb(payload)
       } catch (err) {
         logger.error(`EventBus: error executing subscriber for "${event}":`, {
           userId: payload.userId,

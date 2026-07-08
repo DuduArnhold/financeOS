@@ -7,6 +7,9 @@ import { DialogProvider } from '@/context/DialogContext'
 import { ToastProvider }  from '@/context/ToastContext'
 import { Toaster }        from 'sonner'
 import BottomNav          from '@/components/navigation/BottomNav'
+import { bootstrapPlatform } from '@/platform/bootstrap'
+
+bootstrapPlatform()
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })

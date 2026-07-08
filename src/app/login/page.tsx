@@ -87,7 +87,7 @@ export default function LoginPage() {
           }, 800)
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       setSubmitState('error')
       toast.error('Ocorreu um erro ao processar a requisição.')
       setTimeout(() => setSubmitState('idle'), 2000)

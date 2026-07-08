@@ -13,9 +13,10 @@ export const movementService = {
     try {
       const data = await movementRepository.getAll(userId, tipo, range, limit)
       return { success: true, data }
-    } catch (err: any) {
-      logger.error('Error in getMovements service:', err)
-      return { success: false, error: err.message || 'Erro ao carregar movimentações.' }
+    } catch (err) {
+      logger.error('Error in getMovements service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao carregar movimentações.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -49,9 +50,10 @@ export const movementService = {
       })
 
       return { success: true, data: newMovement }
-    } catch (err: any) {
-      logger.error('Error in createMovement service:', err)
-      return { success: false, error: err.message || 'Erro ao criar movimentação.' }
+    } catch (err) {
+      logger.error('Error in createMovement service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao criar movimentação.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -67,9 +69,10 @@ export const movementService = {
 
       const updated = await movementRepository.update(id, userId, movement)
       return { success: true, data: updated }
-    } catch (err: any) {
-      logger.error('Error in updateMovement service:', err)
-      return { success: false, error: err.message || 'Erro ao atualizar movimentação.' }
+    } catch (err) {
+      logger.error('Error in updateMovement service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao atualizar movimentação.'
+      return { success: false, error: errorMsg }
     }
   },
 
@@ -86,9 +89,10 @@ export const movementService = {
       })
 
       return { success: true }
-    } catch (err: any) {
-      logger.error('Error in deleteMovement service:', err)
-      return { success: false, error: err.message || 'Erro ao excluir movimentação.' }
+    } catch (err) {
+      logger.error('Error in deleteMovement service:', { error: err })
+      const errorMsg = err instanceof Error ? err.message : 'Erro ao excluir movimentação.'
+      return { success: false, error: errorMsg }
     }
   }
 }

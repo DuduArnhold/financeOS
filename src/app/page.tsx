@@ -8,7 +8,7 @@ import { getBillingCycleRange, formatCurrency, formatDateLabel } from '@/lib/uti
 import {
   Wallet, ArrowUpRight, ArrowDownRight, PiggyBank,
   CalendarClock, Target, TrendingUp, TrendingDown,
-  PlusCircle, RefreshCw, ArrowLeftRight, DollarSign, Calendar, MessageSquare
+  PlusCircle, ArrowLeftRight, DollarSign, Calendar, MessageSquare
 } from 'lucide-react'
 import Link from 'next/link'
 import { AppShell }  from '@/components/layout/AppShell'
@@ -105,7 +105,12 @@ export default function Dashboard() {
     }
   }, [user, profile, toast])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      load()
+    }, 0)
+    return () => clearTimeout(timeout)
+  }, [load])
 
   const openTransfer = useCallback(() => {
     setTransferValor('')

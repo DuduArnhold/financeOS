@@ -8,7 +8,7 @@ import { useDialog } from '@/context/DialogContext'
 import { formatCurrency, formatDateLabel } from '@/lib/utils'
 import {
   CalendarDays, Plus, Calendar, DollarSign, AlertCircle, CheckCircle2,
-  RefreshCw, CreditCard, Briefcase, Tag, MessageSquare, Trash2
+  RefreshCw, CreditCard, Tag, MessageSquare, Trash2
 } from 'lucide-react'
 
 import { AppShell }       from '@/components/layout/AppShell'
@@ -19,7 +19,6 @@ import { Input }          from '@/components/ui/Input'
 import { Select }         from '@/components/ui/Select'
 import { Badge }          from '@/components/ui/Badge'
 import { ActionRow }      from '@/components/finance/ActionRow'
-import { EmptyState }     from '@/components/feedback/EmptyState'
 import { BottomSheet }    from '@/components/feedback/BottomSheet'
 import { SkeletonTable }  from '@/components/feedback/Skeletons'
 import { PullRefresh }    from '@/components/mobile/PullRefresh'
@@ -117,8 +116,11 @@ export default function ContasPage() {
   }, [user])
 
   useEffect(() => {
-    loadContas()
-    loadInitialData()
+    const timeout = setTimeout(() => {
+      loadContas()
+      loadInitialData()
+    }, 0)
+    return () => clearTimeout(timeout)
   }, [loadContas, loadInitialData])
 
   const openNew = useCallback(() => {

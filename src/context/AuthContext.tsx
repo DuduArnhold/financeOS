@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
@@ -40,7 +40,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
 
-  const fetchProfile = async (uid: string) => {
+  /**
+   * Busca o perfil no banco de dados.
+   * Os metadados de fallback são passados como parâmetro (não fechados sobre o estado
+   * `user`) para que a referência desta função seja permanentemente estável.
+   */
+  const fetchProfile = useCallback(async (
+    uid: string,
+    fallbackMeta?: { nome?: string; email?: string }
+  ) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -57,22 +65,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle()
 
       if (error) {
-        console.error('Error fetching profile:', error)
-        // Fallback para evitar travamento infinito na tela de carregamento (ex: cache de esquema do Supabase desatualizado)
+        console.error('AuthContext: error fetching profile', error)
         setProfile({
           id: uid,
-          nome: user?.user_metadata?.nome || 'Usuário',
-          email: user?.email || '',
+          nome: fallbackMeta?.nome || 'Usuário',
+          email: fallbackMeta?.email || '',
           moeda: 'R$',
           fechamento_dia: 30,
           tema: 'dark',
           ativo: true,
         })
       } else if (data) {
-        // Flatten settings (handles both array and single object returns depending on supabase version)
-        const settingsRaw: any = data.settings
+        // Normaliza settings (pode vir como objeto ou array dependendo da versão do Supabase)
+        interface SettingsDb {
+          moeda?: string
+          fechamento_dia?: number
+          tema?: string
+        }
+        const settingsRaw = data.settings as SettingsDb | SettingsDb[] | null | undefined
         const settingsObj = Array.isArray(settingsRaw) ? settingsRaw[0] : settingsRaw
-        
+
         setProfile({
           id: data.id,
           nome: data.nome,
@@ -85,11 +97,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           tema: settingsObj?.tema || 'dark',
         })
       } else {
-        // Fallback profile if profile row is not created yet (e.g. trigger lag)
+        // Perfil ainda não criado (lag do trigger de novo cadastro)
         setProfile({
           id: uid,
-          nome: user?.user_metadata?.nome || 'Usuário',
-          email: user?.email || '',
+          nome: fallbackMeta?.nome || 'Usuário',
+          email: fallbackMeta?.email || '',
           moeda: 'R$',
           fechamento_dia: 30,
           tema: 'dark',
@@ -97,50 +109,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       }
     } catch (e) {
-      console.error('Exception fetching profile, using fallback:', e)
+      console.error('AuthContext: exception fetching profile, using fallback', e)
       setProfile({
         id: uid,
-        nome: 'Usuário',
-        email: '',
+        nome: fallbackMeta?.nome || 'Usuário',
+        email: fallbackMeta?.email || '',
         moeda: 'R$',
         fechamento_dia: 30,
         tema: 'dark',
         ativo: true,
       })
     }
-  }
+  }, []) // Dependências intencionalmente vazias: a função nunca precisa ser recriada.
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
-      await fetchProfile(user.id)
+      await fetchProfile(user.id, {
+        nome: user.user_metadata?.nome as string | undefined,
+        email: user.email,
+      })
     }
-  }
+  }, [user, fetchProfile])
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
     router.push('/login')
-  }
+  }, [router])
 
+  /**
+   * Efeito principal de autenticação — roda UMA ÚNICA VEZ no mount.
+   * `fetchProfile` é estável (deps vazias), portanto isso é seguro.
+   * Redirecionamentos foram removidos daqui para evitar race conditions;
+   * cada página ou o efeito de guarda abaixo tratam os redirecionamentos.
+   */
   useEffect(() => {
+    let active = true // Evita atualizações de estado em componentes desmontados
+
     const checkUser = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession()
+        if (!active) return
+
         if (session) {
           setUser(session.user)
-          await fetchProfile(session.user.id)
+          await fetchProfile(session.user.id, {
+            nome: session.user.user_metadata?.nome as string | undefined,
+            email: session.user.email,
+          })
         } else {
           setUser(null)
           setProfile(null)
-          if (pathname !== '/login') {
-            router.push('/login')
-          }
         }
       } catch (err) {
-        console.error(err)
+        console.error('AuthContext: error checking session', err)
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
 
@@ -148,27 +173,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!active) return
+
         if (session) {
           setUser(session.user)
-          await fetchProfile(session.user.id)
-          if (pathname === '/login') {
-            router.push('/')
-          }
+          await fetchProfile(session.user.id, {
+            nome: session.user.user_metadata?.nome as string | undefined,
+            email: session.user.email,
+          })
         } else {
           setUser(null)
           setProfile(null)
-          if (pathname !== '/login') {
-            router.push('/login')
-          }
         }
-        setLoading(false)
+        if (active) setLoading(false)
       }
     )
 
     return () => {
+      active = false
       subscription.unsubscribe()
     }
-  }, [pathname, router])
+  }, [fetchProfile]) // fetchProfile é estável — este efeito roda somente uma vez.
+
+  /**
+   * Efeito de guarda de rota: separado do efeito de auth para evitar acoplamento.
+   * Redireciona para /login somente quando o carregamento termina e não há sessão.
+   */
+  useEffect(() => {
+    if (!loading && !user && pathname !== '/login') {
+      router.push('/login')
+    }
+  }, [loading, user, pathname, router])
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, refreshProfile, signOut }}>

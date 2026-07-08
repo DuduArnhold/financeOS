@@ -35,17 +35,24 @@ function applyTheme(resolved: 'dark' | 'light') {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark')
-  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('dark')
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem(STORAGE_KEY) as Theme) || 'dark'
+    }
+    return 'dark'
+  })
+  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || 'dark'
+      return stored === 'system' ? getSystemTheme() : stored
+    }
+    return 'dark'
+  })
 
-  // 1. Carrega do localStorage imediatamente (síncrono — sem flicker)
+  // 1. Aplica o tema na montagem (síncrono — sem flicker)
   useEffect(() => {
-    const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || 'dark'
-    setThemeState(stored)
-    const resolved = stored === 'system' ? getSystemTheme() : stored
-    setResolvedTheme(resolved)
-    applyTheme(resolved)
-  }, [])
+    applyTheme(resolvedTheme)
+  }, [resolvedTheme])
 
   // 2. Escuta mudanças no tema do sistema (se theme === 'system')
   useEffect(() => {

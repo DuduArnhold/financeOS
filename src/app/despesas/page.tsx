@@ -14,7 +14,6 @@ import { Button }         from '@/components/ui/Button'
 import { Card }           from '@/components/ui/Card'
 import { Input }          from '@/components/ui/Input'
 import { Select }         from '@/components/ui/Select'
-import { Badge }          from '@/components/ui/Badge'
 import { ActionRow }      from '@/components/finance/ActionRow'
 import { EmptyState }     from '@/components/feedback/EmptyState'
 import { BottomSheet }    from '@/components/feedback/BottomSheet'
@@ -86,7 +85,12 @@ export default function DespesasPage() {
     finally  { setDataLoading(false) }
   }, [user, profile, toast]) // eslint-disable-line
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      load()
+    }, 0)
+    return () => clearTimeout(timeout)
+  }, [load])
 
   const openNew = useCallback(() => {
     setEditingId(null); setValor(''); setDescricao(''); setData(TODAY)

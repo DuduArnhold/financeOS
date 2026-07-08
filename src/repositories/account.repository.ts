@@ -11,6 +11,17 @@ export interface Account {
   createdAt?: string
 }
 
+interface DbAccount {
+  id: string
+  user_id: string
+  nome: string
+  saldo_inicial: number | string
+  tipo: Account['tipo']
+  cor: string | null
+  ativo: boolean
+  created_at: string
+}
+
 export const accountRepository = {
   async getActiveAccounts(userId: string): Promise<Account[]> {
     const { data, error } = await supabase
@@ -21,7 +32,8 @@ export const accountRepository = {
       .order('nome', { ascending: true })
 
     if (error) throw error
-    return (data || []).map((d: any) => ({
+    const dbData = data as DbAccount[] | null
+    return (dbData || []).map((d) => ({
       id: d.id,
       userId: d.user_id,
       nome: d.nome,

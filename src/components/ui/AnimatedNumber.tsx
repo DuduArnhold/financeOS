@@ -15,10 +15,14 @@ interface AnimatedNumberProps {
 }
 
 function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false)
+  const [reduced, setReduced] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    }
+    return false
+  })
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setReduced(mq.matches)
     const handler = () => setReduced(mq.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
@@ -42,10 +46,7 @@ export function AnimatedNumber({
   const prevValue  = useRef(value)
 
   useEffect(() => {
-    if (reducedMotion) {
-      setDisplay(value)
-      return
-    }
+    if (reducedMotion) return
 
     const from = prevValue.current
     prevValue.current = value
@@ -76,7 +77,9 @@ export function AnimatedNumber({
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
   }, [value, duration, reducedMotion])
 
-  const formatted = display.toLocaleString('pt-BR', {
+  const displayVal = reducedMotion ? value : display
+
+  const formatted = displayVal.toLocaleString('pt-BR', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })

@@ -16,6 +16,22 @@ export interface Deposit {
   createdAt?: string
 }
 
+interface DbMeta {
+  id: string
+  user_id: string
+  nome: string
+  valor_meta: number | string
+  created_at: string
+}
+
+interface DbDeposit {
+  id: string
+  meta_id: string
+  valor: number | string
+  data: string
+  created_at: string
+}
+
 export const metaRepository = {
   async getAll(userId: string): Promise<Meta[]> {
     const { data, error } = await supabase
@@ -25,7 +41,8 @@ export const metaRepository = {
       .order('created_at', { ascending: true })
 
     if (error) throw error
-    return (data || []).map((d: any) => ({
+    const dbData = data as DbMeta[] | null
+    return (dbData || []).map((d) => ({
       id: d.id,
       userId: d.user_id,
       nome: d.nome,
@@ -44,12 +61,13 @@ export const metaRepository = {
 
     if (error) throw error
     if (!data) return null
+    const d = data as DbMeta
     return {
-      id: data.id,
-      userId: data.user_id,
-      nome: data.nome,
-      valorMeta: Number(data.valor_meta),
-      createdAt: data.created_at,
+      id: d.id,
+      userId: d.user_id,
+      nome: d.nome,
+      valorMeta: Number(d.valor_meta),
+      createdAt: d.created_at,
     }
   },
 
@@ -65,17 +83,18 @@ export const metaRepository = {
       .single()
 
     if (error) throw error
+    const d = data as DbMeta
     return {
-      id: data.id,
-      userId: data.user_id,
-      nome: data.nome,
-      valorMeta: Number(data.valor_meta),
-      createdAt: data.created_at,
+      id: d.id,
+      userId: d.user_id,
+      nome: d.nome,
+      valorMeta: Number(d.valor_meta),
+      createdAt: d.created_at,
     }
   },
 
   async update(id: string, userId: string, meta: Partial<Omit<Meta, 'id' | 'userId' | 'createdAt'>>): Promise<Meta> {
-    const updateData: any = {}
+    const updateData: Partial<DbMeta> = {}
     if (meta.nome !== undefined) updateData.nome = meta.nome
     if (meta.valorMeta !== undefined) updateData.valor_meta = meta.valorMeta
 
@@ -88,12 +107,13 @@ export const metaRepository = {
       .single()
 
     if (error) throw error
+    const d = data as DbMeta
     return {
-      id: data.id,
-      userId: data.user_id,
-      nome: data.nome,
-      valorMeta: Number(data.valor_meta),
-      createdAt: data.created_at,
+      id: d.id,
+      userId: d.user_id,
+      nome: d.nome,
+      valorMeta: Number(d.valor_meta),
+      createdAt: d.created_at,
     }
   },
 
@@ -117,7 +137,8 @@ export const metaRepository = {
       .eq('finance_metas.user_id', userId)
 
     if (error) throw error
-    return (data || []).map((d: any) => ({
+    const dbData = data as DbDeposit[] | null
+    return (dbData || []).map((d) => ({
       id: d.id,
       metaId: d.meta_id,
       valor: Number(d.valor),

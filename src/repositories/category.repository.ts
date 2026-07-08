@@ -11,6 +11,17 @@ export interface Category {
   createdAt?: string
 }
 
+interface DbCategory {
+  id: string
+  user_id: string | null
+  nome: string
+  tipo: Category['tipo']
+  cor: string | null
+  icone: string | null
+  ordem: number
+  created_at: string
+}
+
 export const categoryRepository = {
   async getByType(userId: string, tipo: 'receita' | 'despesa'): Promise<Category[]> {
     const { data, error } = await supabase
@@ -21,7 +32,8 @@ export const categoryRepository = {
       .order('ordem', { ascending: true })
 
     if (error) throw error
-    return (data || []).map((d: any) => ({
+    const dbData = data as DbCategory[] | null
+    return (dbData || []).map((d) => ({
       id: d.id,
       userId: d.user_id,
       nome: d.nome,
