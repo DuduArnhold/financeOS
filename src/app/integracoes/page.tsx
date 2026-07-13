@@ -97,6 +97,19 @@ export default function IntegracoesPage() {
     }
   }, [user, loadData])
 
+  // Efeito para rolar suavemente até a seção de gerenciamento ao selecionar
+  useEffect(() => {
+    if (selectedOrigin) {
+      // Pequeno timeout para dar tempo do React montar o elemento no DOM
+      setTimeout(() => {
+        const el = document.getElementById('manage-section')
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 100)
+    }
+  }, [selectedOrigin])
+
   const handleRefresh = async () => {
     setRefreshing(true)
     await loadData(true)
@@ -169,7 +182,7 @@ export default function IntegracoesPage() {
 
         {/* Detalhes da Integração Selecionada */}
         {selectedOrigin && selectedConnector && user && (
-          <div className="space-y-4 pt-2 animate-fade-in">
+          <div id="manage-section" className="space-y-4 pt-2 animate-fade-in">
             {/* Header da Seleção */}
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
