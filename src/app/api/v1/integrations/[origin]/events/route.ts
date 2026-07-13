@@ -35,13 +35,7 @@ export async function GET(req: Request, { params }: Params) {
       pageSize
     })
 
-    return NextResponse.json(ok(result.items, {
-      page:     result.page,
-      pageSize: result.pageSize,
-      total:    result.total,
-      hasNext:  result.hasNext,
-      hasPrev:  result.hasPrev,
-    }))
+    return NextResponse.json(ok(result))
   } catch (err) {
     console.error('[GET /api/v1/integrations/[origin]/events]', err)
     return NextResponse.json(fail('INTERNAL_ERROR', 'Erro ao listar eventos'), { status: 500 })
