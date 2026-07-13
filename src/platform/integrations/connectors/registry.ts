@@ -1,27 +1,53 @@
 import { IntegrationOrigin } from '../origins'
+import { EventType } from '../event-types'
 
 /**
  * Contrato que todos os conectores de sistemas terceiros devem implementar.
  * Garante que a plataforma possa chamá-los ou reprocessar eventos falhos genericamente.
  */
+export interface WebhookContext {
+  readonly headers: Readonly<Record<string, string>>;
+  readonly ip?: string;
+  readonly requestId: string;
+  readonly correlationId: string;
+}
+
+export interface WebhookRequest {
+  readonly userId: string;
+  readonly eventId: string;
+  readonly payload: unknown;
+  readonly context: WebhookContext;
+}
+
+export interface NormalizationContext {
+  readonly userId: string;
+  readonly eventId: string;
+  readonly correlationId: string;
+  readonly eventType: EventType;
+  readonly connectorVersion: number;
+  readonly replay: boolean;
+}
+
+/**
+ * Contrato que todos os conectores de sistemas terceiros devem implementar.
+ */
 export interface IConnector {
   /**
-   * Processa um evento recebido em tempo real pela porta de entrada (Webhook).
+   * Processa uma requisição recebida no Webhook de entrada.
    */
-  handleEvent(userId: string, eventId: string, eventType: string, rawPayload: unknown): Promise<void>
+  handleWebhook(request: WebhookRequest): Promise<void>
 
   /**
-   * Reprocessa (Replay) um evento histórico que falhou, recebendo o registro de auditoria completo.
+   * Reprocessa (Replay/Retry) um evento histórico ou falhou, recebendo o registro de auditoria completo.
+   * Reconstrói o PlatformEvent canônico a partir do payload bruto (raw data).
    */
-  handleStoredEvent(eventLog: {
+  rehydrateEvent(eventLog: {
     userId: string
     eventId: string
     eventType: string
     payload: unknown
   }): Promise<void>
 }
-
-import { EventType } from '../event-types'
 
 export interface ConnectorCapability {
   readonly eventType: EventType

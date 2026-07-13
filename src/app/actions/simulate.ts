@@ -6,6 +6,8 @@ import { handlerRegistry } from '@/platform/integrations/handlers/registry'
 import { LucroSimplesNormalizer, RawLucroSimplesSale } from '@/platform/integrations/connectors/lucro-simples.normalizer'
 import { PlatformPublisher, InvalidPlatformEvent } from '@/platform/publisher'
 import { PlatformEvent, NormalizedSale } from '@/platform/types'
+import { NormalizationContext } from '@/platform/integrations/connectors/registry'
+import { EventType } from '@/platform/integrations/event-types'
 import { IntegrationMapping, SupabaseIntegrationRepository } from '@/repositories/integration.repository'
 import { MemoryEventBus } from '@/platform/event-bus'
 import { setMovementRepository, MemoryMovementRepository, SupabaseMovementRepository } from '@/repositories/movement.repository'
@@ -71,10 +73,23 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
   }
 
   try {
+    const eventOrigin = scenario === 'no_handler' ? 'plataforma_desconhecida' : 'lucro_simples'
+    const eventType = (scenario === 'no_mapping' ? 'sale.refunded' : 'sale.closed') as EventType
+    const eventIdReal = scenario === 'idempotency' ? 'test_idempotency_fixed_id' : eventId
+
     // ─── Etapa 1: Normalizer ────────────────────────────────────────────────
     let normalized: NormalizedSale
     try {
-      normalized = LucroSimplesNormalizer.normalize(rawSale)
+      const context: NormalizationContext = {
+        userId,
+        eventId: eventIdReal,
+        correlationId: `trace_${Date.now()}`,
+        eventType,
+        connectorVersion: 1,
+        replay: false
+      }
+      const eventResult = LucroSimplesNormalizer.normalize(rawSale, context)
+      normalized = eventResult.payload as NormalizedSale
       steps.push({
         name: 'Normalizer',
         status: 'success',
@@ -91,9 +106,6 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
     }
 
     // ─── Etapa 2: Publisher (validação de schema) ────────────────────────────
-    const eventOrigin = scenario === 'no_handler' ? 'plataforma_desconhecida' : 'lucro_simples'
-    const eventType = scenario === 'no_mapping' ? 'sale.refunded' : 'sale.closed'
-    const eventIdReal = scenario === 'idempotency' ? 'test_idempotency_fixed_id' : eventId
 
     // Caso de Handler Inexistente ou Mapeamento Inexistente com tipo customizado:
     // Se for no_mapping, registramos um dummy handler para podermos passar o passo do Handler Registry
@@ -110,15 +122,17 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
 
     const event: PlatformEvent<NormalizedSale> = {
       id: eventIdReal,
+      type: eventType as any,
       version: 1,
-      schemaVersion: 1,
-      type: eventType,
-      origin: eventOrigin,
       occurredAt: normalized.occurredAt,
       payload: normalized,
       metadata: {
-        tenantId: userId,
-        traceId: `trace_${Date.now()}`
+        origin: eventOrigin as any,
+        userId,
+        requestId: `trace_${Date.now()}`,
+        correlationId: `trace_${Date.now()}`,
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -127,8 +141,8 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
       steps.push({
         name: 'Publisher',
         status: 'success',
-        details: 'Schema validado: id, version, schemaVersion, tenantId, traceId, occurredAt, payload ✓',
-        data: { id: event.id, type: event.type, origin: event.origin }
+        details: 'Schema validado: id, version, userId, correlationId, occurredAt, payload ✓',
+        data: { id: event.id, type: event.type, origin: event.metadata.origin }
       })
     } catch (err) {
       const isSchema = err instanceof InvalidPlatformEvent
@@ -169,7 +183,7 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
     }
 
     // Idempotency Check prévio (para mostrar de forma explícita na UI do Playground)
-    const isAlreadyProcessed = await integrationRepo.isEventProcessed(event.origin, event.id)
+    const isAlreadyProcessed = await integrationRepo.isEventProcessed(event.metadata.origin, event.id)
     if (isAlreadyProcessed) {
       steps.push({
         name: 'EventBus',
@@ -179,8 +193,8 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
       steps.push({
         name: 'Orchestrator',
         status: 'success',
-        details: `[Idempotência] Evento de origem "${event.origin}" com ID "${event.id}" já foi processado anteriormente. Nenhuma movimentação foi duplicada.`,
-        data: { eventId: event.id, origin: event.origin }
+        details: `[Idempotência] Evento de origem "${event.metadata.origin}" com ID "${event.id}" já foi processado anteriormente. Nenhuma movimentação foi duplicada.`,
+        data: { eventId: event.id, origin: event.metadata.origin }
       })
       steps.push({
         name: 'Registry',
@@ -247,11 +261,11 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
     } else {
       // Modo Supabase: busca o registro inserido pelo Orchestrator na tabela real
       const { data } = await authClient
-        .from('moneybridge_events')
-        .select('*')
-        .eq('origin', event.origin)
-        .eq('event_id', event.id)
-        .maybeSingle()
+          .from('moneybridge_events')
+          .select('*')
+          .eq('origin', event.metadata.origin)
+          .eq('event_id', event.id)
+          .maybeSingle()
 
       if (data) {
         eventLogStatus = data.status
@@ -280,13 +294,13 @@ export async function simulatePipeline(options: SimulateOptions): Promise<Simula
       })
 
       // ─── Etapa 6: Registry ─────────────────────────────────────────────────
-      const handler = handlerRegistry.get(event.origin, event.type, event.version)
+      const handler = handlerRegistry.get(event.metadata.origin, event.type, event.version)
       steps.push({
         name: 'Registry',
         status: handler ? 'success' : 'failed',
         details: handler
-          ? `Handler resolvido: ${handler.constructor.name} para (${event.origin}, ${event.type}, v${event.version})`
-          : `Nenhum handler registrado para (${event.origin}, ${event.type}, v${event.version})`
+          ? `Handler resolvido: ${handler.constructor.name} para (${event.metadata.origin}, ${event.type}, v${event.version})`
+          : `Nenhum handler registrado para (${event.metadata.origin}, ${event.type}, v${event.version})`
       })
 
       return { steps, success: true, eventLog: dbLogData }

@@ -14,7 +14,7 @@ export class SaleRefundedHandler implements IntegrationHandler<NormalizedSale, N
     // Registra o estorno como uma despesa associada
     const command: CreateMovementCommand = {
       type: 'CreateMovementCommand',
-      userId: event.metadata.tenantId,
+      userId: event.metadata.userId,
       tipo: 'despesa',
       valor: event.payload.amount,
       accountId: mapping.accountId,
@@ -22,7 +22,7 @@ export class SaleRefundedHandler implements IntegrationHandler<NormalizedSale, N
       formaPagamento: 'Dinheiro',
       data: rawDate,
       descricao: `Estorno: ${event.payload.description}`,
-      origin: event.origin,
+      origin: event.metadata.origin,
       origemRef: event.payload.vendaId || event.id
     }
 

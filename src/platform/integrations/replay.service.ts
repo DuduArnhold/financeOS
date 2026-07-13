@@ -52,9 +52,9 @@ export class IntegrationReplayService {
       throw new Error(`IntegrationReplayService: ${errorMsg}`)
     }
 
-    // 4. Delegar o reprocessamento ao conector correspondente de forma genérica
+    // 4. Delegar o reprocessamento ao conector correspondente de forma genérica (rehidratação)
     try {
-      await registration.connector.handleStoredEvent({
+      await registration.connector.rehydrateEvent({
         userId: eventLog.user_id,
         eventId: eventLog.event_id,
         eventType: eventLog.event_type,

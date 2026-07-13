@@ -16,15 +16,15 @@ export class SaleCancelledHandler implements IntegrationHandler<NormalizedSale, 
       throw new Error('SaleCancelledHandler: vendaId do payload é obrigatório para cancelamento')
     }
 
-    const userId = event.metadata.tenantId
-
+    const userId = event.metadata.userId
+ 
     // Localizar receita correspondente usando a referência de origem externa
-    const movement = await movementRepository.getByOrigemRef(userId, event.origin, vendaId)
+    const movement = await movementRepository.getByOrigemRef(userId, event.metadata.origin, vendaId)
     
     if (!movement) {
       logger.warn('SaleCancelledHandler: original movement not found for cancellation', {
         userId,
-        origin: event.origin,
+        origin: event.metadata.origin,
         vendaId
       })
       return event.payload

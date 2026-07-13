@@ -13,7 +13,7 @@ export class SaleClosedHandler implements IntegrationHandler<NormalizedSale, Nor
 
     const command: CreateMovementCommand = {
       type: 'CreateMovementCommand',
-      userId: event.metadata.tenantId,
+      userId: event.metadata.userId,
       tipo: 'receita',
       valor: event.payload.amount,
       accountId: mapping.accountId,
@@ -21,7 +21,7 @@ export class SaleClosedHandler implements IntegrationHandler<NormalizedSale, Nor
       formaPagamento: 'Dinheiro', // Caixa fechado é recebimento físico padrão
       data: rawDate,
       descricao: event.payload.description,
-      origin: event.origin,
+      origin: event.metadata.origin,
       origemRef: event.payload.vendaId || event.id // Armazena a referência da venda
     }
 

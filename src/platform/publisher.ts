@@ -20,13 +20,17 @@ export class PlatformPublisher {
   static validate(event: PlatformEvent<unknown>): void {
     if (!event.id)                               throw new InvalidPlatformEvent('id')
     if (!event.type)                             throw new InvalidPlatformEvent('type')
-    if (!event.origin)                           throw new InvalidPlatformEvent('origin')
     if (typeof event.version !== 'number')       throw new InvalidPlatformEvent('version')
-    if (typeof event.schemaVersion !== 'number') throw new InvalidPlatformEvent('schemaVersion')
     if (!event.occurredAt)                       throw new InvalidPlatformEvent('occurredAt')
     if (event.payload === undefined || event.payload === null) throw new InvalidPlatformEvent('payload')
-    if (!event.metadata?.tenantId)               throw new InvalidPlatformEvent('metadata.tenantId')
-    if (!event.metadata?.traceId)                throw new InvalidPlatformEvent('metadata.traceId')
+    
+    if (!event.metadata)                         throw new InvalidPlatformEvent('metadata')
+    if (!event.metadata.origin)                  throw new InvalidPlatformEvent('metadata.origin')
+    if (!event.metadata.userId)                  throw new InvalidPlatformEvent('metadata.userId')
+    if (!event.metadata.requestId)               throw new InvalidPlatformEvent('metadata.requestId')
+    if (!event.metadata.correlationId)            throw new InvalidPlatformEvent('metadata.correlationId')
+    if (typeof event.metadata.connectorVersion !== 'number') throw new InvalidPlatformEvent('metadata.connectorVersion')
+    if (typeof event.metadata.replay !== 'boolean') throw new InvalidPlatformEvent('metadata.replay')
   }
 
   /**

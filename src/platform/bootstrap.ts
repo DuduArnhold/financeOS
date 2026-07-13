@@ -12,7 +12,7 @@ import { MoneyBridgeOrchestrator, setMoneyBridgeOrchestrator } from './integrati
 import { supabaseIntegrationRepository } from '@/repositories/integration.repository'
 import { logger } from '@/lib/logger'
 import { connectorRegistry } from './integrations/connectors/registry'
-import { lucroSimplesConnector } from './integrations/connectors/lucro-simples.connector'
+import { LucroSimplesConnector } from './integrations/connectors/lucro-simples.connector'
 import { IntegrationOrigins } from './integrations/origins'
 
 let initialized = false
@@ -41,7 +41,8 @@ function registerCommands() {
 /**
  * Registra os conectores externos suportados pelo ecossistema de integração.
  */
-function registerConnectors() {
+function registerConnectors(orchestrator: MoneyBridgeOrchestrator) {
+  const lucroSimplesConnector = new LucroSimplesConnector(orchestrator)
   connectorRegistry.register({
     origin:            IntegrationOrigins.LUCRO_SIMPLES,
     connector:         lucroSimplesConnector,
@@ -58,13 +59,9 @@ function registerConnectors() {
 }
 
 /**
- * Cria o singleton de produção do MoneyBridgeOrchestrator com SupabaseIntegrationRepository
- * e conecta ao barramento global de eventos.
+ * Conecta o orquestrador ao barramento global de eventos.
  */
-function subscribeEvents() {
-  const orchestrator = new MoneyBridgeOrchestrator(supabaseIntegrationRepository)
-  setMoneyBridgeOrchestrator(orchestrator)
-
+function subscribeEvents(orchestrator: MoneyBridgeOrchestrator) {
   eventBus.subscribe('*', async (event) => {
     logger.info('PlatformBootstrap: event received on global bus', { type: event.type })
     await orchestrator.process(event)
@@ -83,10 +80,13 @@ export function bootstrapPlatform() {
   logger.info('PlatformBootstrap: starting platform initialization...')
 
   try {
+    const orchestrator = new MoneyBridgeOrchestrator(supabaseIntegrationRepository)
+    setMoneyBridgeOrchestrator(orchestrator)
+
     registerHandlers()
     registerCommands()
-    registerConnectors()
-    subscribeEvents()
+    registerConnectors(orchestrator)
+    subscribeEvents(orchestrator)
 
     logger.info('PlatformBootstrap: platform successfully initialized!')
   } catch (err) {

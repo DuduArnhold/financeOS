@@ -1,7 +1,7 @@
 import { test, describe, before } from 'node:test'
 import assert from 'node:assert'
 import { bootstrapPlatform } from '../../bootstrap'
-import { MoneyBridgeOrchestrator } from '../orchestrator'
+import { MoneyBridgeOrchestrator, setMoneyBridgeOrchestrator } from '../orchestrator'
 import { MemoryIntegrationRepository } from '@/repositories/integration.repository.memory'
 import { MemoryMovementRepository, setMovementRepository } from '@/repositories/movement.repository'
 import { MemoryContaRepository, setContaRepository } from '@/repositories/conta.repository'
@@ -90,15 +90,14 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
     setContaRepository(contaRepo)
 
     orchestrator = new MoneyBridgeOrchestrator(integrationRepo)
+    setMoneyBridgeOrchestrator(orchestrator) // Configura o singleton global de teste
   })
 
   test('Deve processar venda fechada (sale.closed) e criar movimentação de receita', async () => {
     const event: PlatformEvent<any> = {
       id: 'evt_sale_101',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.SALE_CLOSED,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -109,8 +108,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         vendaId: 'sale_101'
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_101'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_101',
+        correlationId: 'trace_101',
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -126,10 +129,8 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
   test('Deve processar cancelamento (sale.cancelled) e marcar como removido (soft delete)', async () => {
     const cancelEvent: PlatformEvent<any> = {
       id: 'evt_cancel_102',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.SALE_CANCELLED,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -140,8 +141,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         vendaId: 'sale_101' // ID da venda anterior
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_102'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_102',
+        correlationId: 'trace_102',
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -154,10 +159,8 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
   test('Deve processar reembolso (sale.refunded) criando uma despesa vinculada', async () => {
     const refundEvent: PlatformEvent<any> = {
       id: 'evt_refund_103',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.SALE_REFUNDED,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -168,8 +171,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         vendaId: 'sale_101'
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_103'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_103',
+        correlationId: 'trace_103',
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -186,10 +193,8 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
     // 1. Criar a compra
     const createEvent: PlatformEvent<any> = {
       id: 'evt_pur_create_201',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.PURCHASE_CREATED,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -200,8 +205,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         compraId: 'purchase_201'
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_201'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_201',
+        correlationId: 'trace_201',
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -216,10 +225,8 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
     // 2. Dar baixa na compra
     const payEvent: PlatformEvent<any> = {
       id: 'evt_pur_pay_202',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.PURCHASE_PAID,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -230,8 +237,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         compraId: 'purchase_201'
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_202'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_202',
+        correlationId: 'trace_202',
+        connectorVersion: 1,
+        replay: false
       }
     }
 
@@ -244,10 +255,8 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
   test('Idempotência: Processar o mesmo evento duas vezes deve ignorar o segundo', async () => {
     const event: PlatformEvent<any> = {
       id: 'evt_idempotent_999',
-      version: 1,
-      schemaVersion: 1,
       type: EventTypes.SALE_CLOSED,
-      origin: 'lucro_simples',
+      version: 1,
       occurredAt: new Date().toISOString(),
       payload: {
         occurredAt: new Date().toISOString(),
@@ -257,8 +266,12 @@ describe('Sprint 3.3 - Novos Eventos e Sincronização', () => {
         tags: ['test']
       },
       metadata: {
-        tenantId: 'user_123',
-        traceId: 'trace_999'
+        origin: 'lucro_simples',
+        userId: 'user_123',
+        requestId: 'trace_999',
+        correlationId: 'trace_999',
+        connectorVersion: 1,
+        replay: false
       }
     }
 

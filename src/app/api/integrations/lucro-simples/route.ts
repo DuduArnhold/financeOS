@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { bootstrapPlatform } from '@/platform/bootstrap'
-import { lucroSimplesConnector } from '@/platform/integrations/connectors/lucro-simples.connector'
-import { connectorRegistry } from '@/platform/integrations/connectors/registry'
+import { connectorRegistry, WebhookRequest } from '@/platform/integrations/connectors/registry'
 import { supabaseIntegrationRepository } from '@/repositories/integration.repository'
 import { supabase } from '@/lib/supabase'
 import { hashApiKey, sanitizeIp } from '@/lib/crypto'
 import { RateLimiter } from '@/platform/integrations/rate-limiter'
 import { StructuredLogger } from '@/platform/integrations/structured-logger'
+import { createClient } from '@supabase/supabase-js'
+import { setMovementRepository, SupabaseMovementRepository } from '@/repositories/movement.repository'
+import { setContaRepository, SupabaseContaRepository } from '@/repositories/conta.repository'
 
 /**
  * WEBHOOK: POST /api/integrations/lucro-simples
@@ -194,55 +196,98 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-    // 8. Disparar o processamento síncrono no conector de produção
-    await lucroSimplesConnector.handleSaleClosed(userId, eventId, rawSale)
-
-    // 9. Atualizar metadados de último uso da chave de API em background
-    const ip = sanitizeIp(request.headers, 'unknown-ip')
-    if (apiKeyRecordId) {
-      supabase
-        .from('integration_keys')
-        .update({
-          last_used_at: new Date().toISOString(),
-          last_ip: ip
-        })
-        .eq('id', apiKeyRecordId)
-        .then(({ error }) => {
-          if (error) console.error('[Webhook API] Erro ao atualizar auditoria da chave:', error.message)
-        })
-    }
-
-    // 10. Buscar a movimentação criada no banco para retornar o ID correspondente
-    const { data: movement } = await supabase
-      .from('finance_movements')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('origem', 'lucro_simples')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    const durationMs = Date.now() - startTime
-
-    // Success Log
-    StructuredLogger.log({
-      requestId,
-      correlationId,
-      eventId,
-      userId,
-      origin: 'lucro_simples',
-      durationMs,
-      status: 'success',
-      message: `Webhook processado com sucesso. Transação: ${movement?.id || 'unknown'}`,
-      details: { ip }
+    // Mapear os cabeçalhos HTTP para um Record<string, string> agnóstico
+    const headersObj: Record<string, string> = {}
+    request.headers.forEach((value, key) => {
+      headersObj[key] = value
     })
 
-    return NextResponse.json({
-      status: 'processed',
+    const ip = sanitizeIp(request.headers, 'unknown-ip')
+
+    const webhookRequest: WebhookRequest = {
+      userId,
       eventId,
-      movementId: movement?.id || 'unknown',
-      durationMs
-    }, { status: 200 })
+      payload: rawSale,
+      context: {
+        headers: headersObj,
+        ip,
+        requestId,
+        correlationId
+      }
+    }
+
+    const customJwt = request.headers.get('x-supabase-jwt')
+    if (customJwt) {
+      const authClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${customJwt}`
+            }
+          }
+        }
+      )
+      setMovementRepository(new SupabaseMovementRepository(authClient))
+      setContaRepository(new SupabaseContaRepository(authClient))
+    }
+
+    try {
+      // 8. Disparar o processamento síncrono no conector de produção obtido do registry
+      await registration.connector.handleWebhook(webhookRequest)
+
+      // 9. Atualizar metadados de último uso da chave de API em background
+      if (apiKeyRecordId) {
+        supabase
+          .from('integration_keys')
+          .update({
+            last_used_at: new Date().toISOString(),
+            last_ip: ip
+          })
+          .eq('id', apiKeyRecordId)
+          .then(({ error }) => {
+            if (error) console.error('[Webhook API] Erro ao atualizar auditoria da chave:', error.message)
+          })
+      }
+
+      // 10. Buscar a movimentação criada no banco para retornar o ID correspondente
+      const { data: movement } = await supabase
+        .from('finance_movements')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('origem', 'lucro_simples')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const durationMs = Date.now() - startTime
+
+      // Success Log
+      StructuredLogger.log({
+        requestId,
+        correlationId,
+        eventId,
+        userId,
+        origin: 'lucro_simples',
+        durationMs,
+        status: 'success',
+        message: `Webhook processado com sucesso. Transação: ${movement?.id || 'unknown'}`,
+        details: { ip }
+      })
+
+      return NextResponse.json({
+        status: 'processed',
+        eventId,
+        movementId: movement?.id || 'unknown',
+        durationMs
+      }, { status: 200 })
+    } finally {
+      if (customJwt) {
+        setMovementRepository(new SupabaseMovementRepository())
+        setContaRepository(new SupabaseContaRepository())
+      }
+    }
 
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)

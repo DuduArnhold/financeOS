@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { SupabaseClient } from '@supabase/supabase-js'
 
 export interface Conta {
   id: string
@@ -70,8 +71,10 @@ export interface IContaRepository {
 // ─── Implementação Supabase (produção) ────────────────────────────────────────
 
 export class SupabaseContaRepository implements IContaRepository {
+  constructor(private readonly client: SupabaseClient = supabase) {}
+
   async getAll(userId: string): Promise<Conta[]> {
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('finance_contas')
       .select('*')
       .eq('user_id', userId)
@@ -84,7 +87,7 @@ export class SupabaseContaRepository implements IContaRepository {
   }
 
   async getById(id: string, userId: string): Promise<Conta | null> {
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('finance_contas')
       .select('*')
       .eq('id', id)
@@ -97,7 +100,7 @@ export class SupabaseContaRepository implements IContaRepository {
   }
 
   async insert(conta: Omit<Conta, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<Conta> {
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('finance_contas')
       .insert({
         user_id: conta.userId,
@@ -125,7 +128,7 @@ export class SupabaseContaRepository implements IContaRepository {
     if (conta.categoriaPreferidaId !== undefined) updateData.categoria_preferida_id = conta.categoriaPreferidaId
     if (conta.paidAt !== undefined) updateData.paid_at = conta.paidAt
 
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('finance_contas')
       .update(updateData)
       .eq('id', id)
@@ -138,7 +141,7 @@ export class SupabaseContaRepository implements IContaRepository {
   }
 
   async softDelete(id: string, userId: string): Promise<void> {
-    const { error } = await supabase
+    const { error } = await this.client
       .from('finance_contas')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
@@ -156,7 +159,7 @@ export class SupabaseContaRepository implements IContaRepository {
     data: string,
     observacao: string
   ): Promise<void> {
-    const { error } = await supabase.rpc('pay_conta', {
+    const { error } = await this.client.rpc('pay_conta', {
       p_conta_id: contaId,
       p_user_id: userId,
       p_account_id: accountId,
@@ -170,7 +173,7 @@ export class SupabaseContaRepository implements IContaRepository {
   }
 
   async unpay(contaId: string, userId: string, deleteMovement: boolean): Promise<void> {
-    const { error } = await supabase.rpc('unpay_conta', {
+    const { error } = await this.client.rpc('unpay_conta', {
       p_conta_id: contaId,
       p_user_id: userId,
       p_delete_movement: deleteMovement,
@@ -181,7 +184,7 @@ export class SupabaseContaRepository implements IContaRepository {
 
   // TODO: Temporary implementation. Replacing with Integration References central table in the future.
   async saveReference(contaId: string, userId: string, refId: string): Promise<void> {
-    const { data: current } = await supabase
+    const { data: current } = await this.client
       .from('finance_contas')
       .select('nome')
       .eq('id', contaId)
@@ -190,7 +193,7 @@ export class SupabaseContaRepository implements IContaRepository {
 
     const name = current?.nome ? `${current.nome} [Ref: ${refId}]` : `[Ref: ${refId}]`
 
-    const { error } = await supabase
+    const { error } = await this.client
       .from('finance_contas')
       .update({ nome: name })
       .eq('id', contaId)
@@ -201,7 +204,7 @@ export class SupabaseContaRepository implements IContaRepository {
 
   // TODO: Temporary implementation. Replacing with Integration References central table in the future.
   async getByReference(userId: string, refId: string): Promise<Conta | null> {
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('finance_contas')
       .select('*')
       .eq('user_id', userId)

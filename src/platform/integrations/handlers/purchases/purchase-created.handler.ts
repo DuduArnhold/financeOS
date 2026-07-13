@@ -10,7 +10,7 @@ export class PurchaseCreatedHandler implements IntegrationHandler<NormalizedPurc
    * Insere uma conta a pagar pendente no ledger do FinanceOS.
    */
   async handle(event: PlatformEvent<NormalizedPurchase>, mapping: IntegrationMapping): Promise<NormalizedPurchase> {
-    const userId = event.metadata.tenantId
+    const userId = event.metadata.userId
     const rawDate = event.payload.occurredAt.split('T')[0]
 
     // 1. Criar a conta pendente

@@ -30,6 +30,10 @@ export interface MoneybridgeEventLog {
   attemptCount?: number
   lastAttemptAt?: string
   createdAt?: string
+  firstAttemptAt?: string | null
+  nextRetryAt?: string | null
+  normalizerVersion?: number
+  processingStartedAt?: string | null
 }
 
 // ─── Contrato (Interface) ─────────────────────────────────────────────────────
@@ -47,6 +51,8 @@ export interface IIntegrationRepository {
   insertEventLog(log: Omit<MoneybridgeEventLog, 'id' | 'createdAt'>): Promise<MoneybridgeEventLog>
   updateEventLog(id: string, updates: Partial<MoneybridgeEventLog>): Promise<void>
   findMappings(userId: string, origin: string, eventType: string): Promise<IntegrationMapping[]>
+  findEventLog(origin: string, eventId: string): Promise<MoneybridgeEventLog | null>
+  findFailedEventsForRetry(options: { maxAttempts: number; limit: number }): Promise<MoneybridgeEventLog[]>
 }
 
 // ─── Implementação Supabase (produção) ────────────────────────────────────────
@@ -98,7 +104,11 @@ export class SupabaseIntegrationRepository implements IIntegrationRepository {
         payload: log.payload,
         processed_by: log.processedBy,
         attempt_count: log.attemptCount ?? 1,
-        last_attempt_at: log.lastAttemptAt ?? new Date().toISOString()
+        last_attempt_at: log.lastAttemptAt ?? new Date().toISOString(),
+        first_attempt_at: log.firstAttemptAt,
+        next_retry_at: log.nextRetryAt,
+        normalizer_version: log.normalizerVersion ?? 1,
+        processing_started_at: log.processingStartedAt
       })
       .select()
       .single()
@@ -119,7 +129,11 @@ export class SupabaseIntegrationRepository implements IIntegrationRepository {
       processedBy: data.processed_by,
       attemptCount: data.attempt_count,
       lastAttemptAt: data.last_attempt_at,
-      createdAt: data.created_at
+      createdAt: data.created_at,
+      firstAttemptAt: data.first_attempt_at,
+      nextRetryAt: data.next_retry_at,
+      normalizerVersion: data.normalizer_version,
+      processingStartedAt: data.processing_started_at
     }
   }
 
@@ -137,6 +151,10 @@ export class SupabaseIntegrationRepository implements IIntegrationRepository {
 
     if (updates.attemptCount !== undefined) dbUpdates.attempt_count = updates.attemptCount
     if (updates.lastAttemptAt !== undefined) dbUpdates.last_attempt_at = updates.lastAttemptAt
+    if (updates.firstAttemptAt !== undefined) dbUpdates.first_attempt_at = updates.firstAttemptAt
+    if (updates.nextRetryAt !== undefined) dbUpdates.next_retry_at = updates.nextRetryAt
+    if (updates.normalizerVersion !== undefined) dbUpdates.normalizer_version = updates.normalizerVersion
+    if (updates.processingStartedAt !== undefined) dbUpdates.processing_started_at = updates.processingStartedAt
 
     const { error } = await this.client
       .from('moneybridge_events')
@@ -161,6 +179,76 @@ export class SupabaseIntegrationRepository implements IIntegrationRepository {
     if (error) throw error
 
     return (data || []).length > 0
+  }
+
+  /**
+   * Busca um log de evento específico pela origem e identificador externo.
+   */
+  async findEventLog(origin: string, eventId: string): Promise<MoneybridgeEventLog | null> {
+    const { data, error } = await this.client
+      .from('moneybridge_events')
+      .select('*')
+      .eq('origin', origin)
+      .eq('event_id', eventId)
+      .maybeSingle()
+
+    if (error) throw error
+    if (!data) return null
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      origin: data.origin,
+      eventId: data.event_id,
+      eventType: data.event_type,
+      status: data.status,
+      payload: data.payload,
+      normalizedPayload: data.normalized_payload,
+      durationMs: data.duration_ms,
+      error: data.error,
+      processedBy: data.processed_by,
+      attemptCount: data.attempt_count,
+      lastAttemptAt: data.last_attempt_at,
+      createdAt: data.created_at,
+      firstAttemptAt: data.first_attempt_at,
+      nextRetryAt: data.next_retry_at,
+      normalizerVersion: data.normalizer_version,
+      processingStartedAt: data.processing_started_at
+    }
+  }
+
+  /**
+   * Busca e bloqueia eventos falhos elegíveis para retry usando SKIP LOCKED do PostgreSQL.
+   */
+  async findFailedEventsForRetry(options: { maxAttempts: number; limit: number }): Promise<MoneybridgeEventLog[]> {
+    const { data, error } = await this.client
+      .rpc('claim_failed_events_for_retry', {
+        max_attempts_param: options.maxAttempts,
+        limit_param: options.limit
+      })
+
+    if (error) throw error
+
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      userId: row.user_id,
+      origin: row.origin,
+      eventId: row.event_id,
+      eventType: row.event_type,
+      status: row.status,
+      payload: row.payload,
+      normalizedPayload: row.normalized_payload,
+      durationMs: row.duration_ms,
+      error: row.error,
+      processedBy: row.processed_by,
+      attemptCount: row.attempt_count,
+      lastAttemptAt: row.last_attempt_at,
+      createdAt: row.created_at,
+      firstAttemptAt: row.first_attempt_at,
+      nextRetryAt: row.next_retry_at,
+      normalizerVersion: row.normalizer_version,
+      processingStartedAt: row.processing_started_at
+    }))
   }
 }
 

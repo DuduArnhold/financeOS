@@ -8,6 +8,7 @@ import { IIntegrationRepository, IntegrationMapping, MoneybridgeEventLog } from 
  */
 export class MemoryIntegrationRepository implements IIntegrationRepository {
   private processedEventKeys = new Set<string>()
+  private lockedEventKeys = new Set<string>()
   private eventLogs = new Map<string, MoneybridgeEventLog>()
   private mockMappings: IntegrationMapping[]
 
@@ -37,6 +38,11 @@ export class MemoryIntegrationRepository implements IIntegrationRepository {
     const updated = { ...existing, ...updates }
     this.eventLogs.set(id, updated)
 
+    // Libera o lock se o processamento finalizou
+    if (updates.status === 'processed' || updates.status === 'failed') {
+      this.lockedEventKeys.delete(id)
+    }
+
     // Marcar como processado para garantir idempotência nas próximas verificações
     if (updates.status === 'processed') {
       this.processedEventKeys.add(`${existing.origin}:${existing.eventId}`)
@@ -47,6 +53,40 @@ export class MemoryIntegrationRepository implements IIntegrationRepository {
     return this.mockMappings.filter(
       m => m.userId === userId && m.origin === origin && m.eventType === eventType && m.enabled
     )
+  }
+
+  async findEventLog(origin: string, eventId: string): Promise<MoneybridgeEventLog | null> {
+    for (const log of this.eventLogs.values()) {
+      if (log.origin === origin && log.eventId === eventId) {
+        return log
+      }
+    }
+    return null
+  }
+
+  async findFailedEventsForRetry(options: { maxAttempts: number; limit: number }): Promise<MoneybridgeEventLog[]> {
+    const now = new Date()
+    const eligible = Array.from(this.eventLogs.values())
+      .filter(log => {
+        if (log.status !== 'failed') return false
+        const attempts = log.attemptCount ?? 1
+        if (attempts >= options.maxAttempts) return false
+        if (!log.nextRetryAt) return false
+
+        // Simular SKIP LOCKED
+        if (this.lockedEventKeys.has(log.id)) return false
+
+        const nextRetryDate = new Date(log.nextRetryAt)
+        return nextRetryDate <= now
+      })
+      .sort((a, b) => new Date(a.nextRetryAt!).getTime() - new Date(b.nextRetryAt!).getTime())
+      .slice(0, options.limit)
+
+    for (const log of eligible) {
+      this.lockedEventKeys.add(log.id)
+    }
+
+    return eligible
   }
 
   // ─── Inspeção para testes ─────────────────────────────────────────────────
@@ -61,9 +101,15 @@ export class MemoryIntegrationRepository implements IIntegrationRepository {
     return this.getEventLogs().filter(l => l.status === status)
   }
 
+  /** Libera um lock manualmente (útil para testes unitários de concorrência) */
+  unlock(id: string): void {
+    this.lockedEventKeys.delete(id)
+  }
+
   /** Reseta o estado interno (útil entre cenários de teste). */
   reset(): void {
     this.processedEventKeys.clear()
+    this.lockedEventKeys.clear()
     this.eventLogs.clear()
   }
 }

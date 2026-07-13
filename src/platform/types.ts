@@ -26,24 +26,24 @@ export interface NormalizedPurchase {
   readonly compraId: string;          // ID de referência externa da compra
 }
 
+import { IntegrationOrigin } from './integrations/origins'
+
 /**
  * Interface genérica imutável para eventos da JA Platform.
  */
-export interface PlatformEvent<T> {
+export interface PlatformEvent<T = unknown> {
   readonly id: string;
-  // NOTE: PlatformEvent.version representa a versão do contrato de payload do evento (Event Version).
-  // Ela é independente e isolada da versão lógica do conector (ConnectorRegistration.version).
-  readonly version: number;
-  readonly schemaVersion: number;  // Versão da estrutura física do payload
   readonly type: EventType;        // Tipo estrito do evento (sale.closed, etc.)
-  readonly origin: string;         // Ex: 'lucro_simples'
+  readonly version: number;        // Versão do contrato de payload do evento (Event Version)
   readonly occurredAt: string;     // Carimbo de data/hora em formato ISO 8601
   readonly payload: T;
   readonly metadata: {
-    readonly tenantId: string;     // ID do Usuário (user_id no Supabase)
-    readonly traceId: string;      // ID único para rastrear todo o fluxo
-    readonly causationId?: string; // ID do evento/comando imediato que causou este evento
-    readonly sourceEventId?: string; // ID do evento original de disparo
+    readonly origin: IntegrationOrigin; // Origem tipada da integração
+    readonly userId: string;       // ID do Usuário (user_id no Supabase)
+    readonly requestId: string;    // ID da requisição (correlationId/requestId)
+    readonly correlationId: string; // ID único para rastrear todo o fluxo
+    readonly connectorVersion: number; // Versão lógica do conector
+    readonly replay: boolean;      // Sinalização se o evento veio de Replay
   };
 }
 

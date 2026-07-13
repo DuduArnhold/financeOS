@@ -11,7 +11,7 @@ export class PurchasePaidHandler implements IntegrationHandler<NormalizedPurchas
    * Localiza a conta a pagar correspondente e executa a baixa.
    */
   async handle(event: PlatformEvent<NormalizedPurchase>, mapping: IntegrationMapping): Promise<NormalizedPurchase> {
-    const userId = event.metadata.tenantId
+    const userId = event.metadata.userId
     const compraId = event.payload.compraId
 
     // 1. Localizar a conta pendente por referência (encapsulado no repositório)
