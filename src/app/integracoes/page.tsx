@@ -166,6 +166,12 @@ export default function IntegracoesPage() {
             onConfigure={(origin) => {
               setSelectedOrigin(origin)
               setViewTab('config')
+              setTimeout(() => {
+                const el = document.getElementById('manage-section')
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              }, 80)
             }}
           />
         </div>
