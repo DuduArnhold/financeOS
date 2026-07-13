@@ -330,3 +330,87 @@ export async function POST(request: Request) {
     }, { status: 500 })
   }
 }
+
+/**
+ * GET /api/integrations/lucro-simples
+ *
+ * PING: Endpoint de conectividade para validar chaves, mapeamentos e autenticação do usuário.
+ */
+export async function GET(request: Request) {
+  try {
+    let userId: string | null = null
+    const authHeader = request.headers.get('authorization')
+    let apiKey = ''
+    if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+      apiKey = authHeader.substring(7).trim()
+    } else {
+      apiKey = request.headers.get('x-api-key') || request.headers.get('X-API-Key') || ''
+    }
+
+    if (apiKey) {
+      const keyHash = hashApiKey(apiKey)
+      const { data: keyData, error: keyErr } = await supabase
+        .from('integration_keys')
+        .select('id, user_id')
+        .eq('key_hash', keyHash)
+        .is('revoked_at', null)
+        .maybeSingle()
+
+      if (keyErr) {
+        return NextResponse.json({ error: 'DatabaseError', message: 'Erro ao consultar chave de API.' }, { status: 500 })
+      }
+      if (!keyData) {
+        return NextResponse.json({ error: 'Unauthorized', message: 'Chave de API inválida ou revogada.' }, { status: 401 })
+      }
+      userId = keyData.user_id
+    } else {
+      const { searchParams } = new URL(request.url)
+      userId = searchParams.get('userId')
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized', message: 'Credenciais ausentes. Informe a chave de API no header ou o userId.' }, { status: 401 })
+    }
+
+    // Validar se o perfil existe
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('nome')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (profileErr) {
+      return NextResponse.json({ error: 'DatabaseError', message: 'Erro ao consultar perfil.' }, { status: 500 })
+    }
+    if (!profile) {
+      return NextResponse.json({ error: 'UserNotFound', message: 'Usuário não localizado no sistema.' }, { status: 404 })
+    }
+
+    // Verificar mapeamentos de integração ativos
+    const { data: mappings, error: mappingsErr } = await supabase
+      .from('integration_mappings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('origin', 'lucro_simples')
+      .eq('enabled', true)
+
+    if (mappingsErr) {
+      return NextResponse.json({ error: 'DatabaseError', message: 'Erro ao consultar mapeamentos.' }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      status: 'ok',
+      integration: 'lucro_simples',
+      userId,
+      userName: profile.nome,
+      authenticatedBy: apiKey ? 'api_key' : 'url_fallback',
+      version: 1,
+      activeMappings: mappings?.length || 0
+    }, { status: 200 })
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: 'InternalServerError', message: `Erro ao testar conectividade: ${msg}` }, { status: 500 })
+  }
+}
+
