@@ -47,16 +47,29 @@ export default function IntegracoesPage() {
     }
   }, [user, authLoading, router])
 
-  // Obtém o token JWT da sessão ativa no navegador
+  // Obtém o token JWT da sessão ativa no navegador e escuta por mudanças
   useEffect(() => {
-    if (user) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session) {
-          setAccessToken(session.access_token)
-        }
-      })
+    let active = true
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (active && session) {
+        setAccessToken(session.access_token)
+      }
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active && session) {
+        setAccessToken(session.access_token)
+      } else if (active) {
+        setAccessToken('')
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
     }
-  }, [user])
+  }, [])
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -155,7 +168,7 @@ export default function IntegracoesPage() {
         />
 
         {/* Detalhes da Integração Selecionada */}
-        {selectedOrigin && selectedConnector && user && accessToken && (
+        {selectedOrigin && selectedConnector && user && (
           <div className="space-y-4 pt-2 animate-fade-in">
             {/* Header da Seleção */}
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-800/80">
