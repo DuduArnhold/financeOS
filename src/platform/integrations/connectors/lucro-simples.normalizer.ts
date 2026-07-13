@@ -14,6 +14,15 @@ export class LucroSimplesNormalizer {
    * Converte o payload proprietário do Lucro Simples no contrato PlatformEvent unificado da plataforma.
    */
   static normalize(raw: any, context: NormalizationContext): PlatformEvent<NormalizedSale | NormalizedPurchase> {
+    // Desempacota o envelope de Webhook do Supabase se presente
+    if (raw && typeof raw === 'object') {
+      if (raw.type === 'DELETE' && raw.old_record) {
+        raw = raw.old_record
+      } else if (raw.record) {
+        raw = raw.record
+      }
+    }
+
     // Validações estruturais: o campo existe e tem o tipo correto?
     if (raw.valorLiquido === undefined || raw.valorLiquido === null || typeof raw.valorLiquido !== 'number' || isNaN(raw.valorLiquido)) {
       throw new Error('LucroSimplesNormalizer: valorLiquido ausente ou não é um número')
@@ -93,6 +102,14 @@ export class LucroSimplesNormalizer {
       return typeHeader as EventType
     }
     if (payload && typeof payload === 'object') {
+      // Suporte para detecção automática de eventos do Webhook do Supabase
+      if (payload.type === 'DELETE') {
+        return EventTypes.SALE_CANCELLED
+      }
+      if (payload.type === 'INSERT') {
+        return EventTypes.SALE_CLOSED
+      }
+
       if ('event_type' in payload && payload.event_type) return payload.event_type as EventType
       if ('eventType' in payload && payload.eventType) return payload.eventType as EventType
       if ('type' in payload && payload.type) return payload.type as EventType
